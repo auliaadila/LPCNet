@@ -45,7 +45,7 @@ liblpcnet_la_SOURCES = \
 
 liblpcnet_la_LIBADD = $(DEPS_LIBS) $(lrintf_lib) $(LIBM)
 liblpcnet_la_LDFLAGS = -no-undefined \
- -version-info @OP_LT_CURRENT@:@OP_LT_REVISION@:@OP_LT_AGE@
+ -version-info @OP_LT_CURRENT@:@OP_LT_REVISION@:@OP_LT_AGE@ -static
 
 noinst_PROGRAMS = lpcnet_demo dump_data dump_weights_blob
 
