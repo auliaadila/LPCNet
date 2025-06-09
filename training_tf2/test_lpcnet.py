@@ -33,14 +33,20 @@ import numpy as np
 import lpcnet
 from ulaw import ulaw2lin, lin2ulaw
 
-
 parser = argparse.ArgumentParser()
-parser.add_argument('model-file', type=str, help='model weight h5 file')
+parser.add_argument('model_file', type=str, help='model weight h5 file')
+parser.add_argument('feature_file',
+                    type=str,
+                    help='binary feature file (float32)')
+parser.add_argument('out_file',
+                    type=str,
+                    help='output raw PCM file')
 parser.add_argument('--lpc-gamma', type=float, help='LPC weighting factor. WARNING: giving an inconsistent value here will severely degrade performance', default=1)
 
 args = parser.parse_args()
 
 filename = args.model_file
+
 with h5py.File(filename, "r") as f:
     units = min(f['model_weights']['gru_a']['gru_a']['recurrent_kernel:0'].shape)
     units2 = min(f['model_weights']['gru_b']['gru_b']['recurrent_kernel:0'].shape)
@@ -51,24 +57,30 @@ with h5py.File(filename, "r") as f:
 model, enc, dec = lpcnet.new_lpcnet_model(training = False, rnn_units1=units, rnn_units2=units2, flag_e2e = e2e, cond_size=cond_size, batch_size=1)
 
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['sparse_categorical_accuracy'])
-#model.summary()
+model.summary()
 
-
-feature_file = sys.argv[2]
-out_file = sys.argv[3]
+# feature_file = sys.argv[2]
+# out_file = sys.argv[3]
+feature_file  = args.feature_file
+out_file      = args.out_file
 frame_size = model.frame_size
 nb_features = 36
 nb_used_features = model.nb_used_features
 
-features = np.fromfile(feature_file, dtype='float32')
-features = np.resize(features, (-1, nb_features))
+features = np.fromfile(feature_file, dtype='float32') #per file
+
+import IPython
+IPython.embed()
+
+features = np.resize(features, (int(features.shape[0]/nb_features), nb_features))
+# features = np.resize(features, (-1, nb_features))
 nb_frames = 1
 feature_chunk_size = features.shape[0]
 pcm_chunk_size = frame_size*feature_chunk_size
 
+
 features = np.reshape(features, (nb_frames, feature_chunk_size, nb_features))
 periods = (.1 + 50*features[:,:,18:19]+100).astype('int16')
-
 
 
 model.load_weights(filename);
@@ -93,13 +105,13 @@ for c in range(0, nb_frames):
         cfeat = enc.predict([features[c:c+1, :, :nb_used_features], periods[c:c+1, :, :]])
     else:
         cfeat,lpcs = enc.predict([features[c:c+1, :, :nb_used_features], periods[c:c+1, :, :]])
-    for fr in range(0, feature_chunk_size):
+    for fr in range(0, feature_chunk_size): #per frame
         f = c*feature_chunk_size + fr
         if not e2e:
             a = features[c, fr, nb_features-order:] * lpc_weights
         else:
             a = lpcs[c,fr]
-        for i in range(skip, frame_size):
+        for i in range(skip, frame_size): # sample by sample synthesis
             pred = -sum(a*pcm[f*frame_size + i - 1:f*frame_size + i - order-1:-1])
             fexc[0, 0, 1] = lin2ulaw(pred)
 
