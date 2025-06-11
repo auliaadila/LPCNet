@@ -12,6 +12,8 @@ def lpc2rc(lpc):
         lpc = (lpc[:,:,:-1] - ki*lpc[:,:,-2::-1])/(1-ki*ki)
     return rc
 
+BITS_PER_FRAME = 64
+
 class LPCNetLoader(Sequence):
     def __init__(self, data, features, periods, batch_size, e2e=False, lookahead=2):
         self.batch_size = batch_size
@@ -21,6 +23,7 @@ class LPCNetLoader(Sequence):
         self.periods = periods[:self.nb_batches*self.batch_size, :]
         self.e2e = e2e
         self.lookahead = lookahead
+        self.bits_per_frame = BITS_PER_FRAME
         self.on_epoch_end()
 
     def on_epoch_end(self):
@@ -33,8 +36,19 @@ class LPCNetLoader(Sequence):
         out_data = data[: , :, 1:]
         features = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :-16]
         periods = self.periods[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
+        
+        # -------------- WATERMARK BITS ---------------------------
+        nb_frames = features.shape[1]          # time dimension (=T/160)
+        bits_in = np.random.randint(0, 2,
+                    size=(self.batch_size,
+                          nb_frames,
+                          self.bits_per_frame)
+                  ).astype('int32')            # shape (B,F,64)
+        
+        # -------------- pack inputs / outputs --------------------
         outputs = [out_data]
-        inputs = [in_data, features, periods]
+        inputs = [in_data, features, periods, bits_in]
+        
         if self.lookahead > 0:
             lpc = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], 4-self.lookahead:-self.lookahead, -16:]
         else:

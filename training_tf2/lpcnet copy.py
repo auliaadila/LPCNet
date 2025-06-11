@@ -35,7 +35,6 @@ from tensorflow.keras.constraints import Constraint
 from tensorflow.keras.initializers import Initializer
 from tensorflow.keras.callbacks import Callback
 from mdense import MDense
-from watermark import WatermarkEmbedding, WatermarkAddition
 import numpy as np
 import h5py
 import sys
@@ -274,33 +273,6 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     past_errors = error_calc([pcm,tensor_preds]) #embed here #(128, None, 1) None: number of samples, set at runtime
 
     residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
-
-    # move this to dataloader
-    bits_in = Input(shape=(None, 64),  # 64 bits per frame
-                batch_size=batch_size,
-                dtype='int32',
-                name='wm_bits')
-
-    # After you've computed `past_errors` (residual) but before LPC synthesis
-    wm_layer   = WatermarkEmbedding(frame_size=160,
-                                    bits_per_frame=64,
-                                    alpha_init=0.04,
-                                    trainable_alpha=True,
-                                    name='wm_embed')
-
-    residual_w = wm_layer([bits_in, residual]) #shape?
-
-    wm_add_layer = WatermarkAddition(learnable_mask=True, beta=0.1,
-                                name="wm_add")
-    
-    pcm_w = wm_add_layer([pcm, residual_w]) #shape?
-
-    # Feed the *marked* residual downstream instead of `past_errors`
-    # e.g. for past_errors you used:
-    # past_errors = error_calc([pcm, tensor_preds])
-    # just replace with:
-    # past_errors = residual_w
-
     residual_u = tf_l2u(residual)
 
     # # Extra inputs ----------------------------------------------------------
@@ -372,8 +344,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     
     m_out = Concatenate(name='pdf')([tensor_preds,real_preds,ulaw_prob]) #ulaw_prob is not actually prob?
     if not flag_e2e:
-        # model = Model([pcm, feat, pitch, lpcoeffs], m_out)
-        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], [m_out, residual_w, pcm_w])
+        model = Model([pcm, feat, pitch, lpcoeffs], m_out)
         # model = Model([pcm, feat, pitch, lpcoeffs, splitmess_in, sigma_in], m_out)
     else:
         model = Model([pcm, feat, pitch], [m_out, cfeat])

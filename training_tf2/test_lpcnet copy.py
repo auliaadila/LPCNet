@@ -42,9 +42,6 @@ parser.add_argument('feature_file',
 parser.add_argument('out_file',
                     type=str,
                     help='output raw PCM file')
-parser.add_argument('out_file_w',
-                    type=str,
-                    help='output raw PCM file for watermarked speech')
 parser.add_argument('--lpc-gamma', type=float, help='LPC weighting factor. WARNING: giving an inconsistent value here will severely degrade performance', default=1)
 
 args = parser.parse_args()
@@ -67,7 +64,6 @@ model.summary()
 # out_file = sys.argv[3]
 feature_file  = args.feature_file
 out_file      = args.out_file
-out_file_w      = args.out_file_w
 frame_size = model.frame_size #160
 nb_features = 36
 nb_used_features = model.nb_used_features #20
@@ -93,10 +89,6 @@ model.load_weights(filename);
 order = 16
 
 pcm = np.zeros((nb_frames*pcm_chunk_size, ))
-sw_all = np.zeros_like(pcm) 
-sw_frames = sw_all.reshape(nb_frames * feature_chunk_size,
-                                   frame_size)
-
 fexc = np.zeros((1, 1, 3), dtype='int16')+128
 state1 = np.zeros((1, model.rnn_units1), dtype='float32')
 state2 = np.zeros((1, model.rnn_units2), dtype='float32')
@@ -113,29 +105,7 @@ base, _ = os.path.splitext(out_file)        # strips *whatever* extension
 residual_path        = base + '_residual.npy'
 residual_frame_path  = base + '_residual_frames.npy'
 
-# ──────────────────────────────────────────────────────────────────────
-# 0.  CONFIGURE WATERMARK
-# ──────────────────────────────────────────────────────────────────────
-BITS_PER_FRAME = 64          # payload size
-ALPHA          = 0.04        # global strength (≈ –25 dB wrt e[n])
-
-# provide/derive one payload per frame  (here: pseudo-random for demo)
-rng   = np.random.RandomState(123)
-bits  = rng.randint(0, 2, size=(feature_chunk_size, BITS_PER_FRAME)).astype(np.float32)  # (F,64)
-bits  = bits*2.0 - 1.0        # 0/1 → ±1
-# repeat each bit over 160/BITS_PER_FRAME samples (= chip_len)
-chip_len = frame_size // BITS_PER_FRAME   # = 2 (with remainder 32 samples)
-rep_pat  = np.concatenate([np.repeat(b, chip_len) for b in bits], axis=-1)
-extra    = frame_size - chip_len*BITS_PER_FRAME
-if extra:                                 # spread the remaining chips
-    rep_pat = np.hstack([rep_pat,
-                         bits[:, :extra].reshape(-1, extra)])
-rep_pat = rep_pat.reshape(feature_chunk_size, frame_size)   # (F,160)
-# ──────────────────────────────────────────────────────────────────────
-
-
 fout = open(out_file, 'wb')
-foutw = open(out_file_w, 'wb')
 
 skip = order + 1
 for c in range(0, nb_frames):
@@ -170,24 +140,15 @@ for c in range(0, nb_frames):
             residual_lin = ulaw2lin(fexc[0, 0, 2]) # e[n]  (float32)
             residual_all[idx] = residual_lin       # save to flat array
             # ───────────────────────────────────────────────────────────
-                
-            pcm[idx] = pred + residual_lin
 
             ## watermark embedding
-            bit_chip   = rep_pat[fr, i]                    # ±1 for this sample
-            wm_sample  = ALPHA * bit_chip * residual_lin   # α·bit·e
-            marked_sample = pcm[idx] + wm_sample   # host + watermark -> change host to actual host (input audio); adjust to how pcm is read
-            sw_all[idx] = marked_sample
+            
 
-            # feedback to decoder: CLEAN sample
+            pcm[idx] = pred + residual_lin
             fexc[0, 0, 0] = lin2ulaw(pcm[idx])
-            mem = coef*mem + pcm[idx] #st
-            mem_w = coef*mem_w + sw_all[idx] #sw
-
+            mem = coef*mem + pcm[idx]
             #print(mem)
             np.array([np.round(mem)], dtype='int16').tofile(fout)
-            np.array([np.round(mem_w)], dtype='int16').tofile(foutw)
-
         skip = 0
 
 for path in (residual_path, residual_frame_path):
