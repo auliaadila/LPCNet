@@ -101,9 +101,15 @@ fexc = np.zeros((1, 1, 3), dtype='int16')+128
 state1 = np.zeros((1, model.rnn_units1), dtype='float32')
 state2 = np.zeros((1, model.rnn_units2), dtype='float32')
 
+# to keep residual signal
 residual_all   = np.zeros(nb_frames * pcm_chunk_size, dtype='float32')
 residual_frames = residual_all.reshape(nb_frames * feature_chunk_size,
                                        frame_size)
+# to keep watermarked residual signal
+wm_all    = np.zeros_like(pcm)                       # flat view
+wm_frames = wm_all.reshape(nb_frames * feature_chunk_size,
+                           frame_size)               # (F,160)
+
 mem = 0
 coef = 0.85
 
@@ -112,6 +118,8 @@ lpc_weights = np.array([args.lpc_gamma ** (i + 1) for i in range(16)])
 base, _ = os.path.splitext(out_file)        # strips *whatever* extension
 residual_path        = base + '_residual.npy'
 residual_frame_path  = base + '_residual_frames.npy'
+residual_wm_path        = base + '_wmresidual.npy'
+residual_wm_frame_path  = base + '_wmresidual_frames.npy'
 
 # ──────────────────────────────────────────────────────────────────────
 # 0.  CONFIGURE WATERMARK
@@ -132,7 +140,6 @@ if extra:                                 # spread the remaining chips
                          bits[:, :extra].reshape(-1, extra)])
 rep_pat = rep_pat.reshape(feature_chunk_size, frame_size)   # (F,160)
 # ──────────────────────────────────────────────────────────────────────
-
 
 fout = open(out_file, 'wb')
 foutw = open(out_file_w, 'wb')
@@ -169,15 +176,19 @@ for c in range(0, nb_frames):
             # ─── NEW: store residual e[n] in linear domain ──────────────
             residual_lin = ulaw2lin(fexc[0, 0, 2]) # e[n]  (float32)
             residual_all[idx] = residual_lin       # save to flat array
+            residual_frames[f,i] = residual_lin
             # ───────────────────────────────────────────────────────────
                 
             pcm[idx] = pred + residual_lin
 
             ## watermark embedding
             bit_chip   = rep_pat[fr, i]                    # ±1 for this sample
-            wm_sample  = ALPHA * bit_chip * residual_lin   # α·bit·e
+            wm_sample  = ALPHA * bit_chip * residual_lin   # α·bit·e -> keep wm_sample?
             marked_sample = pcm[idx] + wm_sample   # host + watermark -> change host to actual host (input audio); adjust to how pcm is read
+            # keep watermarked signals
             sw_all[idx] = marked_sample
+            wm_all[idx] = wm_sample           # store flat
+            wm_frames[f,i] = wm_sample          # optional per-frame store
 
             # feedback to decoder: CLEAN sample
             fexc[0, 0, 0] = lin2ulaw(pcm[idx])
@@ -190,8 +201,16 @@ for c in range(0, nb_frames):
 
         skip = 0
 
+# save residual
 for path in (residual_path, residual_frame_path):
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     np.save(path, residual_all if 'frames' not in path else residual_frames)
 
 print("Saved residuals to", residual_path, "and", residual_frame_path)
+
+# save watermarked residual
+for path in (residual_wm_path, residual_wm_frame_path):
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    np.save(path, wm_all if 'frames' not in path else wm_frames)
+
+print("Saved watermarked residuals to", residual_wm_path, "and", residual_wm_frame_path)
