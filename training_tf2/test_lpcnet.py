@@ -72,15 +72,15 @@ frame_size = model.frame_size #160
 nb_features = 36
 nb_used_features = model.nb_used_features #20
 
-features = np.fromfile(feature_file, dtype='float32') #per file #(7056,)
+features = np.fromfile(feature_file, dtype='float32') #per file #(7056,) #(17640,)
 
 # import IPython
 # IPython.embed()
 
-features = np.resize(features, (int(features.shape[0]/nb_features), nb_features)) #(196, 36)
+features = np.resize(features, (int(features.shape[0]/nb_features), nb_features)) #(196, 36) #(490, 36)
 # features = np.resize(features, (-1, nb_features))
 nb_frames = 1
-feature_chunk_size = features.shape[0] #196
+feature_chunk_size = features.shape[0] #depends on the audio; 196, 490
 pcm_chunk_size = frame_size*feature_chunk_size #1,128,960 (sample?)
 
 
@@ -111,6 +111,7 @@ wm_frames = wm_all.reshape(nb_frames * feature_chunk_size,
                            frame_size)               # (F,160)
 
 mem = 0
+mem_w = 0
 coef = 0.85
 
 lpc_weights = np.array([args.lpc_gamma ** (i + 1) for i in range(16)])
@@ -133,13 +134,18 @@ bits  = rng.randint(0, 2, size=(feature_chunk_size, BITS_PER_FRAME)).astype(np.f
 bits  = bits*2.0 - 1.0        # 0/1 → ±1
 # repeat each bit over 160/BITS_PER_FRAME samples (= chip_len)
 chip_len = frame_size // BITS_PER_FRAME   # = 2 (with remainder 32 samples)
-rep_pat  = np.concatenate([np.repeat(b, chip_len) for b in bits], axis=-1)
-extra    = frame_size - chip_len*BITS_PER_FRAME
+rep_pat  = np.stack([np.repeat(b, chip_len) for b in bits], axis=0) #(feature_chunk_size, BITS_PER_FRAME*chip_len)
+extra    = frame_size - chip_len*BITS_PER_FRAME #32
+
 if extra:                                 # spread the remaining chips
     rep_pat = np.hstack([rep_pat,
                          bits[:, :extra].reshape(-1, extra)])
-rep_pat = rep_pat.reshape(feature_chunk_size, frame_size)   # (F,160)
+else:
+    rep_pat = rep_pat.reshape(feature_chunk_size, frame_size)   # (F,160) #final target
 # ──────────────────────────────────────────────────────────────────────
+
+# import IPython
+# IPython.embed()
 
 fout = open(out_file, 'wb')
 foutw = open(out_file_w, 'wb')
