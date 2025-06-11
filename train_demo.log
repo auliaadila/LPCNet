@@ -1,0 +1,206 @@
+Python 3.8.20 (default, Oct  3 2024, 15:24:27) 
+Type 'copyright', 'credits' or 'license' for more information
+IPython 8.12.2 -- An enhanced Interactive Python. Type '?' for help.
+
+In [1]: (None, 2400, 256)
+
+In [2]: (128, None, 384)
+
+In [3]: (128, None, 128)
+
+In [4]: (128, None, 512)
+
+In [5]: (128, None, 384)
+
+In [6]: ---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+Cell In[6], line 1
+----> 1 print(md.shape)
+
+AttributeError: 'MDense' object has no attribute 'shape'
+
+In [7]: (128, None, 16)
+
+In [8]: (128, None, 256)
+
+In [9]: (128, None, 1)
+
+In [10]: (128, None, 1)
+
+In [11]: (128, None, 128)
+
+In [12]: (128, None, 16)
+
+In [13]: (128, None, 1)
+
+In [14]: (128, None, 1)
+
+In [15]: (128, None, 84)
+
+In [16]: ---------------------------------------------------------------------------
+NameError                                 Traceback (most recent call last)
+Cell In[16], line 1
+----> 1 eixt()
+
+NameError: name 'eixt' is not defined
+
+In [17]: 
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to                     
+==================================================================================================
+ input_8 (InputLayer)           [(128, None, 16)]    0           []                               
+                                                                                                  
+ input_1 (InputLayer)           [(128, None, 1)]     0           []                               
+                                                                                                  
+ lambda_1 (Lambda)              (128, None, 16)      0           ['input_8[0][0]']                
+                                                                                                  
+ lpc2preds (diff_pred)          (128, None, 1)       0           ['input_1[0][0]',                
+                                                                  'lambda_1[0][0]']               
+                                                                                                  
+ tf.math.abs (TFOpLambda)       (128, None, 1)       0           ['input_1[0][0]']                
+                                                                                                  
+ tf.math.abs_1 (TFOpLambda)     (128, None, 1)       0           ['lpc2preds[0][0]']              
+                                                                                                  
+ tf.math.multiply (TFOpLambda)  (128, None, 1)       0           ['tf.math.abs[0][0]']            
+                                                                                                  
+ tf.math.multiply_3 (TFOpLambda  (128, None, 1)      0           ['tf.math.abs_1[0][0]']          
+ )                                                                                                
+                                                                                                  
+ tf.__operators__.add (TFOpLamb  (128, None, 1)      0           ['tf.math.multiply[0][0]']       
+ da)                                                                                              
+                                                                                                  
+ tf.__operators__.add_2 (TFOpLa  (128, None, 1)      0           ['tf.math.multiply_3[0][0]']     
+ mbda)                                                                                            
+                                                                                                  
+ tf.math.log (TFOpLambda)       (128, None, 1)       0           ['tf.__operators__.add[0][0]']   
+                                                                                                  
+ tf.math.log_1 (TFOpLambda)     (128, None, 1)       0           ['tf.__operators__.add_2[0][0]'] 
+                                                                                                  
+ tf.math.multiply_1 (TFOpLambda  (128, None, 1)      0           ['tf.math.log[0][0]']            
+ )                                                                                                
+                                                                                                  
+ tf.math.multiply_4 (TFOpLambda  (128, None, 1)      0           ['tf.math.log_1[0][0]']          
+ )                                                                                                
+                                                                                                  
+ input_4 (InputLayer)           [(128, None, 1)]     0           []                               
+                                                                                                  
+ tf.math.sign (TFOpLambda)      (128, None, 1)       0           ['input_1[0][0]']                
+                                                                                                  
+ tf.math.truediv (TFOpLambda)   (128, None, 1)       0           ['tf.math.multiply_1[0][0]']     
+                                                                                                  
+ tf.math.sign_1 (TFOpLambda)    (128, None, 1)       0           ['lpc2preds[0][0]']              
+                                                                                                  
+ tf.math.truediv_1 (TFOpLambda)  (128, None, 1)      0           ['tf.math.multiply_4[0][0]']     
+                                                                                                  
+ embed_pitch (Embedding)        (128, None, 1, 64)   16384       ['input_4[0][0]']                
+                                                                                                  
+ tf.math.multiply_2 (TFOpLambda  (128, None, 1)      0           ['tf.math.sign[0][0]',           
+ )                                                                'tf.math.truediv[0][0]']        
+                                                                                                  
+ tf.math.multiply_5 (TFOpLambda  (128, None, 1)      0           ['tf.math.sign_1[0][0]',         
+ )                                                                'tf.math.truediv_1[0][0]']      
+                                                                                                  
+ input_3 (InputLayer)           [(128, None, 20)]    0           []                               
+                                                                                                  
+ reshape (Reshape)              (128, None, 64)      0           ['embed_pitch[0][0]']            
+                                                                                                  
+ tf.__operators__.add_1 (TFOpLa  (128, None, 1)      0           ['tf.math.multiply_2[0][0]']     
+ mbda)                                                                                            
+                                                                                                  
+ tf.__operators__.add_3 (TFOpLa  (128, None, 1)      0           ['tf.math.multiply_5[0][0]']     
+ mbda)                                                                                            
+                                                                                                  
+ concatenate (Concatenate)      (128, None, 84)      0           ['input_3[0][0]',                
+                                                                  'reshape[0][0]']                
+                                                                                                  
+ tf.clip_by_value (TFOpLambda)  (128, None, 1)       0           ['tf.__operators__.add_1[0][0]'] 
+                                                                                                  
+ tf.clip_by_value_1 (TFOpLambda  (128, None, 1)      0           ['tf.__operators__.add_3[0][0]'] 
+ )                                                                                                
+                                                                                                  
+ lambda (Lambda)                (128, None, 1)       0           ['input_1[0][0]',                
+                                                                  'lpc2preds[0][0]']              
+                                                                                                  
+ feature_conv1 (Conv1D)         (128, None, 128)     32384       ['concatenate[0][0]']            
+                                                                                                  
+ concatenate_1 (Concatenate)    (128, None, 3)       0           ['tf.clip_by_value[0][0]',       
+                                                                  'tf.clip_by_value_1[0][0]',     
+                                                                  'lambda[0][0]']                 
+                                                                                                  
+ feature_conv2 (Conv1D)         (128, None, 128)     49280       ['feature_conv1[0][0]']          
+                                                                                                  
+ gaussian_noise (GaussianNoise)  (128, None, 3)      0           ['concatenate_1[0][0]']          
+                                                                                                  
+ feature_dense1 (Dense)         (128, None, 128)     16512       ['feature_conv2[0][0]']          
+                                                                                                  
+ embed_sig (diff_Embed)         (128, None, 3, 128)  32768       ['gaussian_noise[0][0]']         
+                                                                                                  
+ feature_dense2 (Dense)         (128, None, 128)     16512       ['feature_dense1[0][0]']         
+                                                                                                  
+ reshape_1 (Reshape)            (128, None, 384)     0           ['embed_sig[0][0]']              
+                                                                                                  
+ lambda_2 (Lambda)              (128, None, 128)     0           ['feature_dense2[0][0]',         
+                                                                  'feature_dense2[0][0]']         
+                                                                                                  
+ concatenate_2 (Concatenate)    (128, None, 512)     0           ['reshape_1[0][0]',              
+                                                                  'lambda_2[0][0]']               
+                                                                                                  
+ gru_a (CuDNNGRU)               multiple             1034496     ['concatenate_2[0][0]']          
+                                                                                                  
+ gaussian_noise_1 (GaussianNois  (128, None, 384)    0           ['gru_a[0][0]']                  
+ e)                                                                                               
+                                                                                                  
+ concatenate_3 (Concatenate)    (128, None, 512)     0           ['gaussian_noise_1[0][0]',       
+                                                                  'lambda_2[1][0]']               
+                                                                                                  
+ gru_b (CuDNNGRU)               multiple             25440       ['concatenate_3[0][0]']          
+                                                                                                  
+ dual_fc (MDense)               (128, None, 256)     9216        ['gru_b[0][0]']                  
+                                                                                                  
+ real_lpc2preds (diff_pred)     (128, None, 1)       0           ['input_1[0][0]',                
+                                                                  'input_8[0][0]']                
+                                                                                                  
+ lambda_3 (Lambda)              (None, 2400, 256)    0           ['dual_fc[0][0]']                
+                                                                                                  
+ pdf (Concatenate)              (128, 2400, 258)     0           ['lpc2preds[0][0]',              
+                                                                  'real_lpc2preds[0][0]',         
+                                                                  'lambda_3[0][0]']               
+                                                                                                  
+==================================================================================================
+Total params: 1,232,995
+Trainable params: 1,232,992
+Non-trainable params: 3
+__________________________________________________________________________________________________
+Epoch 1/120
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+File ~/Data/research/LPCNet/training_tf2/train_lpcnet.py:214
+    211     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
+    212     callbacks.append(tensorboard_callback)
+--> 214 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
+
+File ~/miniconda3/envs/lpcnet/lib/python3.8/site-packages/keras/utils/traceback_utils.py:70, in filter_traceback.<locals>.error_handler(*args, **kwargs)
+     67     filtered_tb = _process_traceback_frames(e.__traceback__)
+     68     # To get the full stack trace, call:
+     69     # `tf.debugging.disable_traceback_filtering()`
+---> 70     raise e.with_traceback(filtered_tb) from None
+     71 finally:
+     72     del filtered_tb
+
+File ~/miniconda3/envs/lpcnet/lib/python3.8/site-packages/tensorflow/python/eager/execute.py:54, in quick_execute(op_name, num_outputs, inputs, attrs, ctx, name)
+     52 try:
+     53   ctx.ensure_initialized()
+---> 54   tensors = pywrap_tfe.TFE_Py_Execute(ctx._handle, device_name, op_name,
+     55                                       inputs, attrs, num_outputs)
+     56 except core._NotOkStatusException as e:
+     57   if name is not None:
+
+InvalidArgumentError: No OpKernel was registered to support Op 'CudnnRNNV2' used by {{node model/gru_a/CudnnRNNV2}} with these attrs: [direction="unidirectional", rnn_mode="gru", is_training=true, seed2=0, seed=0, dropout=0, input_mode="linear_input", T=DT_FLOAT]
+Registered devices: [CPU]
+Registered kernels:
+  device='GPU'; T in [DT_DOUBLE]
+  device='GPU'; T in [DT_FLOAT]
+  device='GPU'; T in [DT_HALF]
+
+	 [[model/gru_a/CudnnRNNV2]] [Op:__inference_train_function_7745]
