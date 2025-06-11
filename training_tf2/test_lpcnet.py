@@ -107,8 +107,8 @@ residual_frames = residual_all.reshape(nb_frames * feature_chunk_size,
                                        frame_size)
 # to keep watermarked residual signal
 wm_all    = np.zeros_like(pcm)                       # flat view
-wm_frames = wm_all.reshape(nb_frames * feature_chunk_size,
-                           frame_size)               # (F,160)
+# wm_frames = wm_all.reshape(nb_frames * feature_chunk_size,
+#                            frame_size)               # (F,160)
 
 mem = 0
 mem_w = 0
@@ -121,6 +121,9 @@ residual_path        = base + '_residual.npy'
 residual_frame_path  = base + '_residual_frames.npy'
 residual_wm_path        = base + '_wmresidual.npy'
 residual_wm_frame_path  = base + '_wmresidual_frames.npy'
+payload_path = base + '_payload_bits.npy'
+pcm_txt_path = base + '_pcm_frames.txt'
+sw_txt_path  = base + '_wm_frames.txt'
 
 # ──────────────────────────────────────────────────────────────────────
 # 0.  CONFIGURE WATERMARK
@@ -131,6 +134,7 @@ ALPHA          = 0.04        # global strength (≈ –25 dB wrt e[n])
 # provide/derive one payload per frame  (here: pseudo-random for demo)
 rng   = np.random.RandomState(123)
 bits  = rng.randint(0, 2, size=(feature_chunk_size, BITS_PER_FRAME)).astype(np.float32)  # (F,64)
+payload_bits = bits.copy() 
 bits  = bits*2.0 - 1.0        # 0/1 → ±1
 # repeat each bit over 160/BITS_PER_FRAME samples (= chip_len)
 chip_len = frame_size // BITS_PER_FRAME   # = 2 (with remainder 32 samples)
@@ -194,7 +198,6 @@ for c in range(0, nb_frames):
             # keep watermarked signals
             sw_all[idx] = marked_sample
             wm_all[idx] = wm_sample           # store flat
-            wm_frames[f,i] = wm_sample          # optional per-frame store
 
             # feedback to decoder: CLEAN sample
             fexc[0, 0, 0] = lin2ulaw(pcm[idx])
@@ -206,6 +209,17 @@ for c in range(0, nb_frames):
             np.array([np.round(mem_w)], dtype='int16').tofile(foutw)
 
         skip = 0
+
+# save st and sw
+pcm_frames = pcm.reshape(nb_frames * feature_chunk_size, frame_size) #st per frame
+sw_frames  = sw_all.reshape(nb_frames * feature_chunk_size, frame_size) #sw per frame
+
+# each line: 160 samples separated by spaces, 6-decimal float
+np.savetxt(pcm_txt_path, pcm_frames, fmt='%.6f', delimiter=' ')
+np.savetxt(sw_txt_path,  sw_frames,  fmt='%.6f', delimiter=' ')
+
+print("Saved per-frame clean PCM to", pcm_txt_path)
+print("Saved per-frame watermarked PCM to", sw_txt_path)
 
 # save residual
 for path in (residual_path, residual_frame_path):
@@ -220,3 +234,7 @@ for path in (residual_wm_path, residual_wm_frame_path):
     np.save(path, wm_all if 'frames' not in path else wm_frames)
 
 print("Saved watermarked residuals to", residual_wm_path, "and", residual_wm_frame_path)
+
+# save bits
+np.save(payload_path, payload_bits)    # shape (frames , 64)
+print("Saved payload bits to", payload_path)
