@@ -103,7 +103,7 @@ from lossfuncs import *
 nb_epochs = args.epochs
 
 # Try reducing batch_size if you run out of memory on your GPU
-batch_size = args.batch_size
+batch_size = args.batch_size #128
 
 quantize = args.quantize is not None
 retrain = args.retrain is not None
@@ -132,6 +132,7 @@ flag_e2e = args.flag_e2e
 opt = Adam(lr, decay=decay, beta_1=0.5, beta_2=0.8)
 strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
 
+# change here?
 with strategy.scope():
     model, _, _ = lpcnet.new_lpcnet_model(rnn_units1=args.grua_size,
                                           rnn_units2=args.grub_size, 
@@ -143,38 +144,42 @@ with strategy.scope():
                                           lookahead=args.lookahead
                                           )
     if not flag_e2e:
-        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel)
+        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel) #defining loss functions
     else:
         model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
     model.summary()
 
 feature_file = args.features
 pcm_file = args.data     # 16 bit unsigned short PCM samples
-frame_size = model.frame_size
-nb_features = model.nb_used_features + lpc_order
-nb_used_features = model.nb_used_features
-feature_chunk_size = 15
-pcm_chunk_size = frame_size*feature_chunk_size
+frame_size = model.frame_size #160
+nb_features = model.nb_used_features + lpc_order # 20 + 16 = 36
+nb_used_features = model.nb_used_features #20
+feature_chunk_size = 15 #number of frames
+pcm_chunk_size = frame_size*feature_chunk_size # 160 * 15 = 2400
 
 # u for unquantised, load 16 bit PCM samples and convert to mu-law
 
-data = np.memmap(pcm_file, dtype='int16', mode='r')
-nb_frames = (len(data)//(2*pcm_chunk_size)-1)//batch_size*batch_size
+data = np.memmap(pcm_file, dtype='int16', mode='r') # (1600000000,)
+nb_frames = (len(data)//(2*pcm_chunk_size)-1)//batch_size*batch_size # 333312
 
-features = np.memmap(feature_file, dtype='float32', mode='r')
+features = np.memmap(feature_file, dtype='float32', mode='r') #(180000000,)
+
+import IPython
+IPython.embed()
 
 # limit to discrete number of frames
-data = data[(4-args.lookahead)*2*frame_size:]
-data = data[:nb_frames*2*pcm_chunk_size]
+data = data[(4-args.lookahead)*2*frame_size:] #(1599999360,)
+data = data[:nb_frames*2*pcm_chunk_size] #(1599897600,)
 
 
-data = np.reshape(data, (nb_frames, pcm_chunk_size, 2))
+data = np.reshape(data, (nb_frames, pcm_chunk_size, 2)) #(333312, 2400, 2)
 
 #print("ulaw std = ", np.std(out_exc))
 
-sizeof = features.strides[-1]
+sizeof = features.strides[-1] #4
 features = np.lib.stride_tricks.as_strided(features, shape=(nb_frames, feature_chunk_size+4, nb_features),
                                            strides=(feature_chunk_size*nb_features*sizeof, nb_features*sizeof, sizeof))
+#  (333312, 19, 36)
 #features = features[:, :, :nb_used_features]
 
 
@@ -185,7 +190,7 @@ periods = (.1 + 50*features[:,:,nb_used_features-2:nb_used_features-1]+100).asty
 checkpoint = ModelCheckpoint('{}_{}_{}.h5'.format(args.output, args.grua_size, '{epoch:02d}'))
 
 if args.retrain is not None:
-    model.load_weights(args.retrain)
+    model.load_weights(args.retrain) #load the weight of last checkpoint?
 
 if quantize or retrain:
     #Adapting from an existing model
@@ -203,8 +208,10 @@ else:
 
 model.save_weights('{}_{}_initial.h5'.format(args.output, args.grua_size))
 
+# update arguments on dataloader
 loader = LPCNetLoader(data, features, periods, batch_size, e2e=flag_e2e, lookahead=args.lookahead)
 
+# update callbacks?
 callbacks = [checkpoint, sparsify, grub_sparsify]
 if args.logdir is not None:
     logdir = '{}/{}_{}_logs'.format(args.logdir, args.output, args.grua_size)
