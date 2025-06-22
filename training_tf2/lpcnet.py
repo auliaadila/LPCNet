@@ -260,8 +260,6 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         fdense2.trainable = False
 
     cfeat = fdense2(fdense1(cfeat)) #(128, None, 128)
-
-    error_calc = Lambda(lambda x: tf_l2u(x[0] - tf.roll(x[1],1,axis = 1)))
     if flag_e2e:
         lpcoeffs = diff_rc2lpc(name = "rc2lpc")(cfeat)
     else:
@@ -271,104 +269,49 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     weighting = lpc_gamma ** np.arange(1, 17).astype('float32')
     weighted_lpcoeffs = Lambda(lambda x: x[0]*x[1])([lpcoeffs, weighting])
     tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs]) #(128, None, 1)
-    
-    past_errors = error_calc([pcm,tensor_preds]) #embed here #(128, None, 1) None: number of samples, set at runtime
-
     residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
 
-    print("Residual:", residual.shape) #(128, None, 1)
-
-    
-    # # move this to dataloader
-    # generate bits
-    # bits_in = Input(shape=(None, 64),  # 64 bits per frame
-    #             batch_size=batch_size,
-    #             dtype='int32',
-    #             name='wm_bits')
-
-    # After you've computed `past_errors` (residual) but before LPC synthesis
     wm_embed   = WatermarkEmbedding(frame_size=160,
                                     bits_per_frame=64,
                                     # bits_in=None,
                                     alpha_init=0.04,
                                     trainable_alpha=True,
                                     name='wm_embed') # name ga ngaruh
-
     residual_w = wm_embed([bits_in, residual]) #shape?
+    print("======= WM SPREAD =======")
+    print("residual:", residual.shape) #(128, None, 1)
     print("residual_w", residual_w.shape) #residual_w (128, None, 1)
-    # print("Bits in:", bits_in.shape) #Bits in: (128, None, 1)
-    # print(bits_in)
-    
-    # print("Residual_w:",residual_w.shape) #Residual_w: (128, None, 1)
-
+    print("bits in:", bits_in.shape) #Bits in: (128, None, 1)
     
     wm_add = WatermarkAddition(learnable_mask=False, beta=0.1,
                                 name="wm_add")
-    
-    # pcm_w = wm_add([pcm, residual_w]) #shape?
+    pcm_w = wm_add([pcm, residual_w]) #shape?
+    print("======= WM ADD =======")
+    print("pcm:", pcm.shape) #(128, None, 1)
+    print("residual_w", residual_w.shape) #residual_w (128, None, 1)
+    print("pcm_w:", pcm_w.shape) #Bits in: (128, None, 1)
 
-    
-    # Feed the *marked* residual downstream instead of `past_errors`
-    # e.g. for past_errors you used:
-    # past_errors = error_calc([pcm, tensor_preds])
-    # just replace with:
-    # past_errors = residual_w
-
+    '''
+    ======= WM SPREAD =======
+    residual: (128, None, 1)
+    residual_w (128, None, 1)
+    bits in: (128, None, 1)
+    ======= WM ADD =======
+    pcm: (128, None, 1)
+    residual_w (128, None, 1)
+    pcm_w: (128, None, 1)
+    '''
     
     residual_u = tf_l2u(residual) #residual_u: (128, None, 1)
-    print("residual_u:",residual_u.shape)
-    
-
-    # # Extra inputs ----------------------------------------------------------
-    # splitmess_in = Input(shape=(None,1), name='pn')      # ±1
-    # sigma_in     = Input(shape=(None,1), name='mask')    # masking σ
-
-    # # Frame-level α (either learnable or formula)
-    # alpha_dense  = Dense(1, activation='softplus', name='alpha_dense')
-    # alpha        = alpha_dense(tf.stop_gradient(cfeat))  # (B,T,1)
-
-    # # Watermark -------------------------------------------------------------
-    # delta_e      = Multiply(name='delta_e')(
-    #                 [alpha, past_errors, splitmess_in])  # α·e·m
-    # e_w          = Add(name='residual_w')([past_errors, delta_e])
-
-
-    # # Embed watermark
-    # alpha = 0.05
-    # bits_in = Input(shape=(None,), batch_size=batch_size, dtype='int32')
-    # exc = past_errors
-    # bits_pm = tf.cast(bits_in*2-1, tf.float32)
-    # bits_rep = tf.repeat(bits_pm, frame_size, axis=-1)
-    # bits_rep = tf.reshape(bits_rep,tf.shape(exc)[:-1])
-    # wm_dss = alpha * tf.expand_dims(bits_rep,-1)*exc
-    # mark = host_in + wm_dss ####
-
-    # host + residual_w
-    pcm_w = wm_add([pcm, residual_w]) #shape?
     
     ## export pcm_w
-
-    '''
-    residual_w_u = tf_l2u(residual_w)
-    '''
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
-    # cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),past_errors])
     cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_u]) 
-
-    '''
-    # pred + residual_w -> if feed into rnn layer
-    cpcm_w = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_w_u])
-    cpcm_w = GaussianNoise(.3)(cpcm_w)
-    cpcm_w = Reshape((-1, embed_size*3))(embed(cpcm_w))
-    cpcm_w_decoder = Reshape((-1, embed_size*3))(embed(cpcm_w))
-    '''
-
     cpcm = GaussianNoise(.3)(cpcm)
     cpcm = Reshape((-1, embed_size*3))(embed(cpcm))
     cpcm_decoder = Reshape((-1, embed_size*3))(embed(dpcm))
 
-    
     rep = Lambda(lambda x: K.repeat_elements(x, frame_size, 1))
 
     quant = quant_regularizer if quantize else None
@@ -410,11 +353,6 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
 
     # gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
     # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
-
-    # print(tenso)
-    m_out_w = pcm_w #how to get this to the output?
-    print("m_out_w:",m_out_w.shape) #m_out_w: (128, None, 1)
-    print("m_out:",m_out.shape) #m_out: (128, 2400, 258)
     
     if not flag_e2e:
         # model = Model([pcm, feat, pitch, lpcoeffs], m_out)
