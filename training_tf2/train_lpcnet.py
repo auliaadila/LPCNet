@@ -134,7 +134,7 @@ strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
 
 # change here?
 with strategy.scope():
-    model, _, _ = lpcnet.new_lpcnet_model(rnn_units1=args.grua_size,
+    model, _, _, wm_embed, wm_add = lpcnet.new_lpcnet_model(rnn_units1=args.grua_size,
                                           rnn_units2=args.grub_size, 
                                           batch_size=batch_size, training=True,
                                           quantize=quantize,
@@ -164,8 +164,8 @@ nb_frames = (len(data)//(2*pcm_chunk_size)-1)//batch_size*batch_size # 333312
 
 features = np.memmap(feature_file, dtype='float32', mode='r') #(180000000,)
 
-import IPython
-IPython.embed()
+# import IPython
+# IPython.embed()
 
 # limit to discrete number of frames
 data = data[(4-args.lookahead)*2*frame_size:] #(1599999360,)
@@ -209,7 +209,9 @@ else:
 model.save_weights('{}_{}_initial.h5'.format(args.output, args.grua_size))
 
 # update arguments on dataloader
-loader = LPCNetLoader(data, features, periods, batch_size, e2e=flag_e2e, lookahead=args.lookahead)
+# generate 64 bits inside the loader -> model.fit (same bits_in got embedded inside data?)
+# target: same bits embedded per second
+loader = LPCNetLoader(data, features, periods, batch_size, bits_in=None, e2e=flag_e2e, lookahead=args.lookahead)
 
 # update callbacks?
 callbacks = [checkpoint, sparsify, grub_sparsify]
@@ -219,3 +221,15 @@ if args.logdir is not None:
     callbacks.append(tensorboard_callback)
 
 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
+
+'''
+Epoch 1/120
+Traceback (most recent call last):
+  File "training_tf2/train_lpcnet.py", line 223, in <module>
+    model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
+  File "/home/adila/miniconda3/envs/lpcnet/lib/python3.8/site-packages/keras/utils/traceback_utils.py", line 70, in error_handler
+    raise e.with_traceback(filtered_tb) from None
+  File "/home/adila/miniconda3/envs/lpcnet/lib/python3.8/site-packages/keras/engine/training.py", line 1576, in fit
+    raise ValueError(
+ValueError: Unexpected result of `train_function` (Empty logs). Please use `Model.compile(..., run_eagerly=True)`, or `tf.config.run_functions_eagerly(True)` for more information of where went wrong, or file a issue/bug to `tf.keras`.
+'''

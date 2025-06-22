@@ -237,6 +237,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     dpcm = Input(shape=(None, 3), batch_size=batch_size)
     feat = Input(shape=(None, nb_used_features), batch_size=batch_size)
     pitch = Input(shape=(None, 1), batch_size=batch_size)
+    bits_in = Input(shape=(None, 1), batch_size=batch_size)
     dec_feat = Input(shape=(None, cond_size))
     dec_state1 = Input(shape=(rnn_units1,))
     dec_state2 = Input(shape=(rnn_units2,))
@@ -275,33 +276,48 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
 
     residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
 
-    # move this to dataloader
-    bits_in = Input(shape=(None, 64),  # 64 bits per frame
-                batch_size=batch_size,
-                dtype='int32',
-                name='wm_bits')
+    print("Residual:", residual.shape) #(128, None, 1)
+
+    
+    # # move this to dataloader
+    # generate bits
+    # bits_in = Input(shape=(None, 64),  # 64 bits per frame
+    #             batch_size=batch_size,
+    #             dtype='int32',
+    #             name='wm_bits')
 
     # After you've computed `past_errors` (residual) but before LPC synthesis
-    wm_layer   = WatermarkEmbedding(frame_size=160,
+    wm_embed   = WatermarkEmbedding(frame_size=160,
                                     bits_per_frame=64,
+                                    # bits_in=None,
                                     alpha_init=0.04,
                                     trainable_alpha=True,
-                                    name='wm_embed')
+                                    name='wm_embed') # name ga ngaruh
 
-    residual_w = wm_layer([bits_in, residual]) #shape?
+    residual_w = wm_embed([bits_in, residual]) #shape?
+    print("residual_w", residual_w.shape) #residual_w (128, None, 1)
+    # print("Bits in:", bits_in.shape) #Bits in: (128, None, 1)
+    # print(bits_in)
+    
+    # print("Residual_w:",residual_w.shape) #Residual_w: (128, None, 1)
 
-    wm_add_layer = WatermarkAddition(learnable_mask=True, beta=0.1,
+    
+    wm_add = WatermarkAddition(learnable_mask=False, beta=0.1,
                                 name="wm_add")
     
-    pcm_w = wm_add_layer([pcm, residual_w]) #shape?
+    # pcm_w = wm_add([pcm, residual_w]) #shape?
 
+    
     # Feed the *marked* residual downstream instead of `past_errors`
     # e.g. for past_errors you used:
     # past_errors = error_calc([pcm, tensor_preds])
     # just replace with:
     # past_errors = residual_w
 
-    residual_u = tf_l2u(residual)
+    
+    residual_u = tf_l2u(residual) #residual_u: (128, None, 1)
+    print("residual_u:",residual_u.shape)
+    
 
     # # Extra inputs ----------------------------------------------------------
     # splitmess_in = Input(shape=(None,1), name='pn')      # ±1
@@ -326,11 +342,28 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     # bits_rep = tf.reshape(bits_rep,tf.shape(exc)[:-1])
     # wm_dss = alpha * tf.expand_dims(bits_rep,-1)*exc
     # mark = host_in + wm_dss ####
+
+    # host + residual_w
+    pcm_w = wm_add([pcm, residual_w]) #shape?
+    
+    ## export pcm_w
+
+    '''
+    residual_w_u = tf_l2u(residual_w)
+    '''
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
     # cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),past_errors])
     cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_u]) 
-    # cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),e_w]) 
+
+    '''
+    # pred + residual_w -> if feed into rnn layer
+    cpcm_w = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_w_u])
+    cpcm_w = GaussianNoise(.3)(cpcm_w)
+    cpcm_w = Reshape((-1, embed_size*3))(embed(cpcm_w))
+    cpcm_w_decoder = Reshape((-1, embed_size*3))(embed(cpcm_w))
+    '''
+
     cpcm = GaussianNoise(.3)(cpcm)
     cpcm = Reshape((-1, embed_size*3))(embed(cpcm))
     cpcm_decoder = Reshape((-1, embed_size*3))(embed(dpcm))
@@ -371,12 +404,25 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         embed.Trainable=False
     
     m_out = Concatenate(name='pdf')([tensor_preds,real_preds,ulaw_prob]) #ulaw_prob is not actually prob?
+    # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
+    # tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs]) #(128, None, 1)
+    # real_preds = diff_pred(name = "real_lpc2preds")([pcm,lpcoeffs]) #(128, None, 1)
+
+    # gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
+    # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
+
+    # print(tenso)
+    m_out_w = pcm_w #how to get this to the output?
+    print("m_out_w:",m_out_w.shape) #m_out_w: (128, None, 1)
+    print("m_out:",m_out.shape) #m_out: (128, 2400, 258)
+    
     if not flag_e2e:
         # model = Model([pcm, feat, pitch, lpcoeffs], m_out)
-        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], [m_out, residual_w, pcm_w])
+        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], [m_out, residual_w, pcm_w]) #output utk loss dan inference
         # model = Model([pcm, feat, pitch, lpcoeffs, splitmess_in, sigma_in], m_out)
     else:
-        model = Model([pcm, feat, pitch], [m_out, cfeat])
+        # model = Model([pcm, feat, pitch], [m_out, cfeat])
+        model = Model([pcm, feat, pitch, bits_in], [m_out, cfeat, residual_w, pcm_w]) #output utk loss dan inference
     model.rnn_units1 = rnn_units1
     model.rnn_units2 = rnn_units2
     model.nb_used_features = nb_used_features
@@ -388,6 +434,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     else:
         encoder = Model([feat, pitch], [cfeat,lpcoeffs])
         dec_rnn_in = Concatenate()([cpcm_decoder, dec_feat])
+        
     dec_gru_out1, state1 = rnn(dec_rnn_in, initial_state=dec_state1)
     dec_gru_out2, state2 = rnn2(Concatenate()([dec_gru_out1, dec_feat]), initial_state=dec_state2)
     dec_ulaw_prob = Lambda(tree_to_pdf_infer)(md(dec_gru_out2))
@@ -402,4 +449,5 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     set_parameter(model, 'flag_e2e', flag_e2e, dtype='bool')
     set_parameter(model, 'lookahead', lookahead, dtype='int32')
 
-    return model, encoder, decoder
+    # return model, encoder, decoder
+    return model, encoder, decoder, wm_embed, wm_add

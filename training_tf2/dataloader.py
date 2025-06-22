@@ -23,36 +23,57 @@ class LPCNetLoader(Sequence):
         self.periods = periods[:self.nb_batches*self.batch_size, :]
         self.e2e = e2e
         self.lookahead = lookahead
-        self.bits_per_frame = BITS_PER_FRAME
+        self.bps = BITS_PER_FRAME
+
+        # print("INIT LPCNET LOADER")
+        # print("nb_batches:", self.nb_batches) #0
+        # print("data:", self.data.shape) #data: (0, 2400, 2)
+        # print("features:", self.features.shape) #features: (0, 19, 36)
+        # print("periods:",self.periods.shape) #periods: (0, 19, 1)
 
         if bits_in is None:
             self._make_random_bits()        # fills self.bits_in
         else:
-            assert bits_in.shape[:2] == self.features.shape[:2], \
-                "bits_in must match (N,F) of features"
+            assert bits_in.shape[:2] == self.data.shape[:2], \
+                "bits_in must match (N,F) of data" #why????
             self.bits_in = bits_in.astype('int32')
 
         self.on_epoch_end()
 
     def _make_random_bits(self):
-        N, F = self.features.shape[:2] #batch_size, nb_frames
+        N, F = self.data.shape[:2] #batch_size, nb_frames
+        # print("target bit shape")
+        # print(N,F) #0,19
         self.bits_in = np.random.randint(
-            0, 2, size=(N, F, self.bits_per_frame), dtype='int32')
+            0, 2, size=(N, F, self.bps), dtype='int32') #bps: to be embedded per second
         
     def on_epoch_end(self):
         self.indices = np.arange(self.nb_batches*self.batch_size)
+        # print("indices:",self.indices)
         np.random.shuffle(self.indices)
-        # regenerate a fresh random payload each epoch (optional)
+        # regenerate a fresh random payload each epoch (optional) -> yes
         self._make_random_bits()
 
 
     def __getitem__(self, index):
+        # print("GET ITEM")
+        # print("index:",index)
+        # print("id:",index*self.batch_size)
+        # print("(id + 1):",(index+1)*self.batch_size)
+        # per batch size
         data = self.data[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
         in_data = data[: , :, :1]
         out_data = data[: , :, 1:]
         features = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :-16]
         periods = self.periods[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
         bits_in = self.bits_in[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
+
+        # print("data:", data.shape)
+        # print("in_data:", in_data.shape)
+        # print("out_data:", out_data.shape)
+        # print("features:", features.shape)
+        # print("periods:", periods.shape)
+        # print("bits_in:", bits_in.shape)
 
         outputs = [out_data]
         inputs = [in_data, features, periods, bits_in]
@@ -69,3 +90,21 @@ class LPCNetLoader(Sequence):
 
     def __len__(self):
         return self.nb_batches
+
+
+# INIT LPCNET LOADER
+# nb_batches: 0
+# data: (0, 2400, 2)
+# features: (0, 19, 36)
+# periods: (0, 19, 1)
+# indices: []
+# GET ITEM
+# index: 0
+# id: 0
+# (id + 1): 128
+# data: (0, 2400, 2)
+# in_data: (0, 2400, 1)
+# out_data: (0, 2400, 1)
+# features: (0, 19, 20)
+# periods: (0, 19, 1)
+# bits_in: (0, 19, 64)
