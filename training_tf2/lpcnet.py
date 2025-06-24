@@ -48,6 +48,10 @@ pcm_bits = 8
 embed_size = 128
 pcm_levels = 2**pcm_bits
 
+def debug_shape(x, name):
+    tf.print(name, tf.shape(x))
+    return x
+
 def interleave(p, samples):
     p2=tf.expand_dims(p, 3)
     nb_repeats = pcm_levels//(2*p.shape[2])
@@ -278,18 +282,19 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
                                     trainable_alpha=True,
                                     name='wm_embed') # name ga ngaruh
     residual_w = wm_embed([bits_in, residual]) #shape?
+    
     print("======= WM SPREAD =======")
     print("residual:", residual.shape) #(128, None, 1)
-    print("residual_w", residual_w.shape) #residual_w (128, None, 1)
-    print("bits in:", bits_in.shape) #Bits in: (128, None, 1)
+    print("residual_w", residual_w.shape) #(128, None, 1)
+    print("bits in:", bits_in.shape) #(128, None, 1)
     
     wm_add = WatermarkAddition(learnable_mask=False, beta=0.1,
                                 name="wm_add")
-    pcm_w = wm_add([pcm, residual_w]) #shape?
+    pcm_w = wm_add([pcm, residual_w])
     print("======= WM ADD =======")
     print("pcm:", pcm.shape) #(128, None, 1)
-    print("residual_w", residual_w.shape) #residual_w (128, None, 1)
-    print("pcm_w:", pcm_w.shape) #Bits in: (128, None, 1)
+    print("residual_w", residual_w.shape) #(128, None, 1)
+    print("pcm_w:", pcm_w.shape) #(128, None, 1)
 
     '''
     ======= WM SPREAD =======

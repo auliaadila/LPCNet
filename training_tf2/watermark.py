@@ -77,8 +77,8 @@ class WatermarkEmbedding(Layer):
         T = tf.shape(residual)[1] #number of samples
         F = tf.shape(wm_bpf)[1]
 
-        print("Embedding: B, N, F")
-        print(B,T,F)
+        # print("Embedding: B, N, F")
+        # print(B,T,F)
 
         # Tensor("wm_embed/strided_slice:0", shape=(), dtype=int32)
         # Tensor("wm_embed/strided_slice_1:0", shape=(), dtype=int32)
@@ -146,26 +146,26 @@ class WatermarkEmbedding(Layer):
             tiled_i = tf.tile(slice_i, [1, 1, rep_pattern[i]])  # (B, F, rep_pattern[i])
             spread_slices.append(tiled_i)
 
-        print("Spread slice:",len(spread_slices)) #64
+        # print("Spread slice:",len(spread_slices)) #64
 
         # 2) concatenate all those slices along the last axis
         bits_spread = tf.concat(spread_slices, axis=-1)  # shape (B, F, T)
-        print("bits spread:", bits_spread) #bits spread: Tensor("wm_embed/concat:0", shape=(128, None, 3), dtype=float32)
+        # print("bits spread:", bits_spread) #bits spread: Tensor("wm_embed/concat:0", shape=(128, None, 3), dtype=float32)
 
         # 3) finally reshape to (B, T)
         bits_spread = tf.reshape(bits_spread, (B, T))            # (B,T)
-        print("bits spread reshape:", bits_spread.shape) #bits spread reshape: (128, None)
+        # print("bits spread reshape:", bits_spread.shape) #bits spread reshape: (128, None)
 
         # --- watermark: alpha * bit * residual -----------------------------
-        print("alpha:", self.alpha)
+        # print("alpha:", self.alpha)
         # alpha: MirroredVariable:{
         #     0: <tf.Variable 'wm_embed/alpha:0' shape=() dtype=float32>
         #     }
-        print("residual:", residual.shape) #residual: (128, None)
+        # print("residual:", residual.shape) #residual: (128, None)
 
         # if constant alpha
         wm = self.alpha * bits_spread * residual                 # (B,T)
-        print("wm:", wm.shape) #wm: (128, None)
+        # print("wm:", wm.shape) #wm: (128, None)
 
         '''
         # if adaptive alpha

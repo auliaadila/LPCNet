@@ -61,9 +61,12 @@ parser.add_argument('--cuda-devices', metavar='<cuda devices>', type=str, defaul
 
 args = parser.parse_args()
 
+
 # set visible cuda devices
 if args.cuda_devices != None:
     os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda_devices
+
+
 
 density = (0.05, 0.05, 0.2)
 if args.density_split is not None:
@@ -99,6 +102,16 @@ from lossfuncs import *
 #    tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=5120)])
 #  except RuntimeError as e:
 #    print(e)
+
+# Run eagerly so you see the real error (very useful!)
+tf.config.run_functions_eagerly(True)
+tf.data.experimental.enable_debug_mode()
+
+class ShapeLogger(tf.keras.callbacks.Callback):
+    def on_train_batch_end(self, batch, logs=None):
+        tf.print("residual batch shape:", tf.shape(self.model.get_layer('wm_embed').output))
+        self.model.stop_training = True  # only need one batch
+
 
 nb_epochs = args.epochs
 
@@ -144,7 +157,8 @@ with strategy.scope():
                                           lookahead=args.lookahead
                                           )
     if not flag_e2e:
-        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel) #defining loss functions
+        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel, run_eagerly=True) #defining loss functions
+        # model.compile(optimizer=opt, loss = [metric_cel, ], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
     else:
         model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
     model.summary()
@@ -221,6 +235,9 @@ if args.logdir is not None:
     callbacks.append(tensorboard_callback)
 
 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
+# model.fit_generator(loader, epochs=nb_epochs, callbacks=callbacks)
+# model.fit(loader, epochs=1, validation_split=0.0, callbacks=[ShapeLogger()])
+# model.fit(loader.take(1), callbacks=[ShapeLogger()], epochs=1)
 
 '''
 Epoch 1/120

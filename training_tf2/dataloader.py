@@ -24,6 +24,11 @@ class LPCNetLoader(Sequence):
         self.e2e = e2e
         self.lookahead = lookahead
         self.bps = BITS_PER_FRAME
+        self.bits_in = np.random.randint(0, 2, size=(1, self.bps), dtype='int32')
+
+        # (bs, 2400, 64)
+        # 64 bps: 64 bit per second
+        # 64 bpf: 64 bit per frame
 
         # print("INIT LPCNET LOADER")
         # print("nb_batches:", self.nb_batches) #0
@@ -31,12 +36,18 @@ class LPCNetLoader(Sequence):
         # print("features:", self.features.shape) #features: (0, 19, 36)
         # print("periods:",self.periods.shape) #periods: (0, 19, 1)
 
+        # copy to all batch size
+        self.bits_in = np.broadcast_to(self.bits_in,(self.batch_size, self.data.shape[1], self.bps))
+        # data = np.reshape(data, (nb_frames, pcm_chunk_size, 2))
+
+        '''
         if bits_in is None:
             self._make_random_bits()        # fills self.bits_in
         else:
             assert bits_in.shape[:2] == self.data.shape[:2], \
                 "bits_in must match (N,F) of data" #why????
             self.bits_in = bits_in.astype('int32')
+        '''
 
         self.on_epoch_end()
 
@@ -52,7 +63,7 @@ class LPCNetLoader(Sequence):
         # print("indices:",self.indices)
         np.random.shuffle(self.indices)
         # regenerate a fresh random payload each epoch (optional) -> yes
-        self._make_random_bits()
+        # self._make_random_bits()
 
 
     def __getitem__(self, index):
@@ -66,10 +77,12 @@ class LPCNetLoader(Sequence):
         out_data = data[: , :, 1:]
         features = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :-16]
         periods = self.periods[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
-        bits_in = self.bits_in[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
+        bits_in = self.bits_in
+
+        #generate bits_in
 
         # print("data:", data.shape)
-        # print("in_data:", in_data.shape)
+        # print("in_data:", in_data.shape) #mirip bits_in
         # print("out_data:", out_data.shape)
         # print("features:", features.shape)
         # print("periods:", periods.shape)
