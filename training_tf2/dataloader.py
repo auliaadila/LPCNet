@@ -15,7 +15,7 @@ def lpc2rc(lpc):
 BITS_PER_FRAME = 64
 
 class LPCNetLoader(Sequence):
-    def __init__(self, data, features, periods, batch_size, bits_in=None, e2e=False, lookahead=2):
+    def __init__(self, data, features, periods, batch_size, e2e=False, lookahead=2):
         self.batch_size = batch_size
         self.nb_batches = np.minimum(np.minimum(data.shape[0], features.shape[0]), periods.shape[0])//self.batch_size
         self.data = data[:self.nb_batches*self.batch_size, :]
@@ -25,12 +25,15 @@ class LPCNetLoader(Sequence):
         self.lookahead = lookahead
         self.bits_per_frame = BITS_PER_FRAME
 
+        '''
+
         if bits_in is None:
             self._make_random_bits()        # fills self.bits_in
         else:
             assert bits_in.shape[:2] == self.features.shape[:2], \
                 "bits_in must match (N,F) of features"
             self.bits_in = bits_in.astype('int32')
+        '''
 
         self.on_epoch_end()
 
@@ -43,7 +46,7 @@ class LPCNetLoader(Sequence):
         self.indices = np.arange(self.nb_batches*self.batch_size)
         np.random.shuffle(self.indices)
         # regenerate a fresh random payload each epoch (optional)
-        self._make_random_bits()
+        # self._make_random_bits()
 
 
     def __getitem__(self, index):
