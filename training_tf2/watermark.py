@@ -67,16 +67,46 @@ class WatermarkEmbedding(Layer):
 
     def call(self, inputs):
         wm_bpf, residual = inputs            # unpack
+        residual = residual * tf.ones_like(wm_bpf)  # broadcast residual:  (B,2400,1) → (B,2400,64)
+        wm_bpf = tf.cast(wm_bpf * 2 - 1, tf.float32)      # (B,F,BPF)
+        wm = self.alpha * wm_bpf * residual                 # (B,T,BPF) # per-bit contribution
+        wm_single = tf.reduce_sum(wm, axis=-1, keepdims=True)  # (B,2400,1) # collapse → single channel
+
+        return wm_single
+
+
+
+
+
+    '''
+    def call(self, inputs):
+        wm_bpf, residual = inputs            # unpack
         # need host signal, but input is in feat.32
 
         # squeeze channel dim if present (B,T,1) -> (B,T)
-        if residual.shape.rank == 3:
-            residual = tf.squeeze(residual, axis=-1)        # (B,T)
+        # if residual.shape.rank == 3:
+        #     residual = tf.squeeze(residual, axis=-1)        # (B,T)
 
         B = tf.shape(residual)[0] #batch size
         T = tf.shape(residual)[1] #number of samples
         F = tf.shape(wm_bpf)[1]
 
+
+        print("===> EMBED")
+        print("wm_bpf:",wm_bpf.shape)
+        print("residual:",residual.shape)
+
+        
+        In [4]: wm_bpf.shape
+        Out[4]: TensorShape([128, 2400, 64])
+
+        In [5]: residual.shape
+        Out[5]: TensorShape([128, 2400, 1])
+        
+
+        
+
+>>>>>>> 1e5fc9e (refine watermark and dataloader)
         # print("Embedding: B, N, F")
         # print(B,T,F)
 
@@ -108,10 +138,13 @@ class WatermarkEmbedding(Layer):
 
 
         # --- safety check (dynamic): F*frame_size must equal T -------------
-        with tf.control_dependencies(
-            [tf.debugging.assert_equal(F * self.frame_size, T,
-             message="msg_bits length × frame_size must equal residual length")]):
-            residual = tf.identity(residual)
+        # error
+        # with tf.control_dependencies(
+        #     [tf.debugging.assert_equal(F * self.frame_size, T,
+        #      message="msg_bits length × frame_size must equal residual length")]):
+        #     residual = tf.identity(residual)
+
+
 
         # 0/1  ->  ±1
         bipolar = tf.cast(wm_bpf * 2 - 1, tf.float32)      # (B,F,BPF)
@@ -156,6 +189,9 @@ class WatermarkEmbedding(Layer):
         bits_spread = tf.reshape(bits_spread, (B, T))            # (B,T)
         # print("bits spread reshape:", bits_spread.shape) #bits spread reshape: (128, None)
 
+        # import IPython
+        # IPython.embed()
+
         # --- watermark: alpha * bit * residual -----------------------------
         # print("alpha:", self.alpha)
         # alpha: MirroredVariable:{
@@ -167,7 +203,7 @@ class WatermarkEmbedding(Layer):
         wm = self.alpha * bits_spread * residual                 # (B,T)
         # print("wm:", wm.shape) #wm: (128, None)
 
-        '''
+        
         # if adaptive alpha
         # calculate power per frame ()
         pow_host  = tf.reduce_mean(tf.square(host_f),  axis=-1) + self.eps #need host signal
@@ -179,7 +215,7 @@ class WatermarkEmbedding(Layer):
         # 3. α per frame according to MATLAB formula
         lev_db    = s_db - c_db + self.SSL          # (B,F)
         alpha_f   = tf.pow(10.0, lev_db / 20.0)     # (B,F)
-        '''
+        
 
 
         # residual_mark = residual + wm                            # add
@@ -190,6 +226,7 @@ class WatermarkEmbedding(Layer):
         # pcm_w: (128, None, 1)
         # m_out: (128, 2400, 258)
 
+    '''
     def get_config(self):
         base = super().get_config()
         base.update(dict(frame_size=self.frame_size,
@@ -219,25 +256,36 @@ class WatermarkAddition(Layer):
       marked : float32 (B, T, 1)   – host + g(n)*wm
     """
 
-    def __init__(self, learnable_mask=False, beta=0.1, filters=32, **kw):
+    def __init__(self, trainable_beta=False, beta_init=0.1, **kw):
         super().__init__(**kw)
-        self.learnable_mask = learnable_mask
-        self.beta = beta
-        self.filters = filters
-        if learnable_mask:
-            self.conv1 = Conv1D(filters, 9, padding='same', activation='relu')
-            self.conv2 = Conv1D(filters, 9, padding='same', activation='relu')
-            self.conv3 = Conv1D(1, 9, padding='same', activation='tanh')  # → (-1,+1)
+        self.trainable_beta = trainable_beta
+        self.beta_init = beta_init
+        # self.filters = filters #32
+        # if learnable_mask:
+        #     self.conv1 = Conv1D(filters, 9, padding='same', activation='relu')
+        #     self.conv2 = Conv1D(filters, 9, padding='same', activation='relu')
+        #     self.conv3 = Conv1D(1, 9, padding='same', activation='tanh')  # → (-1,+1)
 
     def build(self, input_shape):
+        if self.trainable_beta:
+            self.beta = self.add_weight(name='beta',
+                                         shape=(),
+                                         initializer=tf.constant_initializer(
+                                             self.beta_init),
+                                         trainable=True)
+        else:
+            self.beta = tf.constant(self.beta_init, dtype=tf.float32)
         super().build(input_shape)
 
     def call(self, inputs):
         host, wm = inputs                   # expect (B,T,1) each
 
-        if not self.learnable_mask:
+        
+
+        if not self.trainable_beta:
             return host + wm               # simple addition
 
+        # TO DO: change this
         # ----- learn g(n) ---------------------------------------------------
         x = Concatenate()([host, wm])       # (B,T,2)
         x = self.conv1(x)
@@ -249,7 +297,7 @@ class WatermarkAddition(Layer):
 
     def get_config(self):
         cfg = super().get_config()
-        cfg.update(dict(learnable_mask=self.learnable_mask,
-                        beta=self.beta,
-                        filters=self.filters))
+        cfg.update(dict(trainable_beta=self.trainable_beta,
+                        beta_init=self.beta_init,
+                        beta=self.beta))
         return cfg

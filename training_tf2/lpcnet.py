@@ -283,18 +283,22 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
                                     name='wm_embed') # name ga ngaruh
     residual_w = wm_embed([bits_in, residual]) #shape?
     
-    print("======= WM SPREAD =======")
-    print("residual:", residual.shape) #(128, None, 1)
-    print("residual_w", residual_w.shape) #(128, None, 1)
-    print("bits in:", bits_in.shape) #(128, None, 1)
+    # print("======= WM SPREAD =======")
+    # print("residual:", residual.shape) #(128, None, 1)
+    # print("residual_w", residual_w.shape) #(128, None, 1)
+    # print("bits in:", bits_in.shape) #(128, None, 1)
     
-    wm_add = WatermarkAddition(learnable_mask=False, beta=0.1,
+    wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
                                 name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
-    print("======= WM ADD =======")
-    print("pcm:", pcm.shape) #(128, None, 1)
-    print("residual_w", residual_w.shape) #(128, None, 1)
-    print("pcm_w:", pcm_w.shape) #(128, None, 1)
+
+    # import IPython
+    # IPython.embed()
+
+    # print("======= WM ADD =======")
+    # print("pcm:", pcm.shape) #(128, None, 1)
+    # print("residual_w", residual_w.shape) #(128, None, 1)
+    # print("pcm_w:", pcm_w.shape) #(128, None, 1)
 
     '''
     ======= WM SPREAD =======

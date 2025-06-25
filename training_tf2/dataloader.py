@@ -88,8 +88,8 @@ class LPCNetLoader(Sequence):
         # print("periods:", periods.shape)
         # print("bits_in:", bits_in.shape)
 
-        outputs = [out_data]
-        inputs = [in_data, features, periods, bits_in]
+        outputs = out_data
+        inputs = [in_data, features, periods, bits_in] #will add lpc
         
         if self.lookahead > 0:
             lpc = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], 4-self.lookahead:-self.lookahead, -16:]

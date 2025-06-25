@@ -234,6 +234,27 @@ if args.logdir is not None:
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     callbacks.append(tensorboard_callback)
 
+batch = loader[0]
+print(f"len(inputs) = {len(batch[0])}")
+print(f"len(outputs) = {len(batch[1])}")
+
+for i, inp in enumerate(batch[0]):
+    print(f"input[{i}] shape = {inp.shape}")
+
+for i, out in enumerate(batch[1]):
+    print(f"output[{i}] shape = {out.shape}")
+
+'''
+len(inputs) = 5
+len(outputs) = 1
+input[0] shape = (128, 2400, 1) #in_data
+input[1] shape = (128, 19, 20) #features
+input[2] shape = (128, 19, 1) #periods
+input[3] shape = (128, 2400, 64) #bits_in
+input[4] shape = (128, 15, 16) #lpcoeffs
+output[0] shape = (128, 2400, 1)
+'''
+
 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
 # model.fit_generator(loader, epochs=nb_epochs, callbacks=callbacks)
 # model.fit(loader, epochs=1, validation_split=0.0, callbacks=[ShapeLogger()])
