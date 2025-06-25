@@ -35,22 +35,18 @@ from tensorflow.keras.constraints import Constraint
 from tensorflow.keras.initializers import Initializer
 from tensorflow.keras.callbacks import Callback
 from mdense import MDense
-from watermark import WatermarkEmbedding, WatermarkAddition
 import numpy as np
 import h5py
 import sys
 from tf_funcs import *
 from diffembed import diff_Embed
 from parameters import set_parameter
+from watermark import WatermarkEmbedding, WatermarkAddition
 
 frame_size = 160
 pcm_bits = 8
 embed_size = 128
 pcm_levels = 2**pcm_bits
-
-def debug_shape(x, name):
-    tf.print(name, tf.shape(x))
-    return x
 
 def interleave(p, samples):
     p2=tf.expand_dims(p, 3)
@@ -237,20 +233,20 @@ class WeightClip(Constraint):
 constraint = WeightClip(0.992)
 
 def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_size=128, training=False, adaptation=False, quantize=False, flag_e2e = False, cond_size=128, lpc_order=16, lpc_gamma=1., lookahead=2):
-    pcm = Input(shape=(None, 1), batch_size=batch_size) #(128, None, 1) ground truth 16-bit sample
+    pcm = Input(shape=(None, 1), batch_size=batch_size)
     dpcm = Input(shape=(None, 3), batch_size=batch_size)
     feat = Input(shape=(None, nb_used_features), batch_size=batch_size)
     pitch = Input(shape=(None, 1), batch_size=batch_size)
-    bits_in = Input(shape=(None, 1), batch_size=batch_size)
     dec_feat = Input(shape=(None, cond_size))
     dec_state1 = Input(shape=(rnn_units1,))
     dec_state2 = Input(shape=(rnn_units2,))
+    bits_in = Input(shape=(None, 1), batch_size=batch_size)
 
     padding = 'valid' if training else 'same'
     fconv1 = Conv1D(cond_size, 3, padding=padding, activation='tanh', name='feature_conv1')
     fconv2 = Conv1D(cond_size, 3, padding=padding, activation='tanh', name='feature_conv2')
     pembed = Embedding(256, 64, name='embed_pitch')
-    cat_feat = Concatenate()([feat, Reshape((-1, 64))(pembed(pitch))]) #(128, None, 84)
+    cat_feat = Concatenate()([feat, Reshape((-1, 64))(pembed(pitch))])
 
     cfeat = fconv2(fconv1(cat_feat))
 
@@ -263,64 +259,42 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         fdense1.trainable = False
         fdense2.trainable = False
 
-    cfeat = fdense2(fdense1(cfeat)) #(128, None, 128)
+    cfeat = fdense2(fdense1(cfeat))
+
+    error_calc = Lambda(lambda x: tf_l2u(x[0] - tf.roll(x[1],1,axis = 1)))
     if flag_e2e:
         lpcoeffs = diff_rc2lpc(name = "rc2lpc")(cfeat)
     else:
-        lpcoeffs = Input(shape=(None, lpc_order), batch_size=batch_size) #(128, None, 16)
+        lpcoeffs = Input(shape=(None, lpc_order), batch_size=batch_size)
         
-    real_preds = diff_pred(name = "real_lpc2preds")([pcm,lpcoeffs]) #(128, None, 1)
+    real_preds = diff_pred(name = "real_lpc2preds")([pcm,lpcoeffs])
     weighting = lpc_gamma ** np.arange(1, 17).astype('float32')
     weighted_lpcoeffs = Lambda(lambda x: x[0]*x[1])([lpcoeffs, weighting])
-    tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs]) #(128, None, 1)
-    residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
+    tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs])
+    past_errors = error_calc([pcm,tensor_preds])
 
+    # Get residual tensor
+    residual = pcm - tf.roll(tensor_preds,1,axis = 1)
+
+    # Embedding: Spread watermark
     wm_embed   = WatermarkEmbedding(frame_size=160,
                                     bits_per_frame=64,
-                                    # bits_in=None,
                                     alpha_init=0.04,
                                     trainable_alpha=True,
-                                    name='wm_embed') # name ga ngaruh
-    residual_w = wm_embed([bits_in, residual]) #shape?
-    
-    # print("======= WM SPREAD =======")
-    # print("residual:", residual.shape) #(128, None, 1)
-    # print("residual_w", residual_w.shape) #(128, None, 1)
-    # print("bits in:", bits_in.shape) #(128, None, 1)
-    
+                                    name='wm_embed')
+    residual_w = wm_embed([bits_in, residual])
+    # Embedding: Add watermarked residue
     wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
                                 name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
-
-    # import IPython
-    # IPython.embed()
-
-    # print("======= WM ADD =======")
-    # print("pcm:", pcm.shape) #(128, None, 1)
-    # print("residual_w", residual_w.shape) #(128, None, 1)
-    # print("pcm_w:", pcm_w.shape) #(128, None, 1)
-
-    '''
-    ======= WM SPREAD =======
-    residual: (128, None, 1)
-    residual_w (128, None, 1)
-    bits in: (128, None, 1)
-    ======= WM ADD =======
-    pcm: (128, None, 1)
-    residual_w (128, None, 1)
-    pcm_w: (128, None, 1)
-    '''
-    
-    residual_u = tf_l2u(residual) #residual_u: (128, None, 1)
-    
-    ## export pcm_w
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
-    cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_u]) 
+    cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),past_errors])
     cpcm = GaussianNoise(.3)(cpcm)
     cpcm = Reshape((-1, embed_size*3))(embed(cpcm))
     cpcm_decoder = Reshape((-1, embed_size*3))(embed(dpcm))
 
+    
     rep = Lambda(lambda x: K.repeat_elements(x, frame_size, 1))
 
     quant = quant_regularizer if quantize else None
@@ -336,18 +310,12 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         rnn2 = GRU(rnn_units2, return_sequences=True, return_state=True, recurrent_activation="sigmoid", reset_after='true', name='gru_b', stateful=True,
                kernel_constraint=constraint, recurrent_constraint = constraint, kernel_regularizer=quant, recurrent_regularizer=quant)
 
-    rnn_in = Concatenate()([cpcm, rep(cfeat)]) #(128, None, 512)
-    #cpcm: (128, None, 384)
-    #cfeat: (128, None, 128)
+    rnn_in = Concatenate()([cpcm, rep(cfeat)])
     md = MDense(pcm_levels, activation='sigmoid', name='dual_fc')
-    gru_out1, _ = rnn(rnn_in) #(128, None, 384)
+    gru_out1, _ = rnn(rnn_in)
     gru_out1 = GaussianNoise(.005)(gru_out1)
-    gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
-    ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
-    # md(gru_out2) (128, None, 256)
-
-    # import IPython
-    # IPython.embed()
+    gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)]))
+    ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2))
 
     if adaptation:
         rnn.trainable=False
@@ -355,21 +323,12 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         md.trainable=False
         embed.Trainable=False
     
-    m_out = Concatenate(name='pdf')([tensor_preds,real_preds,ulaw_prob]) #ulaw_prob is not actually prob?
-    # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
-    # tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs]) #(128, None, 1)
-    # real_preds = diff_pred(name = "real_lpc2preds")([pcm,lpcoeffs]) #(128, None, 1)
-
-    # gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
-    # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
-    
+    m_out = Concatenate(name='pdf')([tensor_preds,real_preds,ulaw_prob])
     if not flag_e2e:
-        # model = Model([pcm, feat, pitch, lpcoeffs], m_out)
-        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], [m_out, residual_w, pcm_w]) #output utk loss dan inference
-        # model = Model([pcm, feat, pitch, lpcoeffs, splitmess_in, sigma_in], m_out)
+        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], 
+              outputs = {'pdf': m_out, 'residual_w': residual_w, 'pcm_w': pcm_w})
     else:
-        # model = Model([pcm, feat, pitch], [m_out, cfeat])
-        model = Model([pcm, feat, pitch, bits_in], [m_out, cfeat, residual_w, pcm_w]) #output utk loss dan inference
+        model = Model([pcm, feat, pitch], [m_out, cfeat])
     model.rnn_units1 = rnn_units1
     model.rnn_units2 = rnn_units2
     model.nb_used_features = nb_used_features
@@ -381,7 +340,6 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     else:
         encoder = Model([feat, pitch], [cfeat,lpcoeffs])
         dec_rnn_in = Concatenate()([cpcm_decoder, dec_feat])
-        
     dec_gru_out1, state1 = rnn(dec_rnn_in, initial_state=dec_state1)
     dec_gru_out2, state2 = rnn2(Concatenate()([dec_gru_out1, dec_feat]), initial_state=dec_state2)
     dec_ulaw_prob = Lambda(tree_to_pdf_infer)(md(dec_gru_out2))
@@ -396,5 +354,4 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     set_parameter(model, 'flag_e2e', flag_e2e, dtype='bool')
     set_parameter(model, 'lookahead', lookahead, dtype='int32')
 
-    # return model, encoder, decoder
     return model, encoder, decoder, wm_embed, wm_add

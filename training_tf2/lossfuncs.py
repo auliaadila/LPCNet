@@ -79,6 +79,23 @@ def metric_cel(y_true, y_pred):
     e_gt = tf.round(e_gt)
     e_gt = tf.cast(e_gt,'int32')
     e_gt = tf.clip_by_value(e_gt,0,255) 
+
+    # print(" =====> METRIC CEL")
+    # tf.print("y_true:", y_true.shape)
+    # tf.print("y_pred:", y_pred.shape)
+    # tf.print("p:",p.shape)
+    # tf.print("model_out:", model_out.shape)
+    # tf.print("e_ground truth:", e_gt.shape)
+
+
+    #  =====> METRIC CEL
+    # y_true: TensorShape([None, None, None])
+    # y_pred: TensorShape([128, 2400, 258])
+    # p: TensorShape([128, 2400, 1])
+    # model_out: TensorShape([128, 2400, 256])
+    # e_ground truth: TensorShape([128, 2400, None])
+
+
     sparse_cel = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)(e_gt,model_out)
     return sparse_cel
 
@@ -97,4 +114,3 @@ def loss_matchlar():
         loss_lar_diff = tf.square(loss_lar_diff)
         return tf.reduce_mean(loss_lar_diff, axis=-1)
     return loss
-

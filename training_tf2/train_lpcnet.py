@@ -61,12 +61,9 @@ parser.add_argument('--cuda-devices', metavar='<cuda devices>', type=str, defaul
 
 args = parser.parse_args()
 
-
 # set visible cuda devices
 if args.cuda_devices != None:
     os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda_devices
-
-
 
 density = (0.05, 0.05, 0.2)
 if args.density_split is not None:
@@ -103,20 +100,10 @@ from lossfuncs import *
 #  except RuntimeError as e:
 #    print(e)
 
-# Run eagerly so you see the real error (very useful!)
-tf.config.run_functions_eagerly(True)
-tf.data.experimental.enable_debug_mode()
-
-class ShapeLogger(tf.keras.callbacks.Callback):
-    def on_train_batch_end(self, batch, logs=None):
-        tf.print("residual batch shape:", tf.shape(self.model.get_layer('wm_embed').output))
-        self.model.stop_training = True  # only need one batch
-
-
 nb_epochs = args.epochs
 
 # Try reducing batch_size if you run out of memory on your GPU
-batch_size = args.batch_size #128
+batch_size = args.batch_size
 
 quantize = args.quantize is not None
 retrain = args.retrain is not None
@@ -145,7 +132,6 @@ flag_e2e = args.flag_e2e
 opt = Adam(lr, decay=decay, beta_1=0.5, beta_2=0.8)
 strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
 
-# change here?
 with strategy.scope():
     model, _, _, wm_embed, wm_add = lpcnet.new_lpcnet_model(rnn_units1=args.grua_size,
                                           rnn_units2=args.grub_size, 
@@ -157,43 +143,41 @@ with strategy.scope():
                                           lookahead=args.lookahead
                                           )
     if not flag_e2e:
-        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel, run_eagerly=True) #defining loss functions
-        # model.compile(optimizer=opt, loss = [metric_cel, ], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
+        model.compile(optimizer=opt,
+              loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
+              metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
+              run_eagerly=True)
     else:
         model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
     model.summary()
 
 feature_file = args.features
 pcm_file = args.data     # 16 bit unsigned short PCM samples
-frame_size = model.frame_size #160
-nb_features = model.nb_used_features + lpc_order # 20 + 16 = 36
-nb_used_features = model.nb_used_features #20
-feature_chunk_size = 15 #number of frames
-pcm_chunk_size = frame_size*feature_chunk_size # 160 * 15 = 2400
+frame_size = model.frame_size
+nb_features = model.nb_used_features + lpc_order
+nb_used_features = model.nb_used_features
+feature_chunk_size = 15
+pcm_chunk_size = frame_size*feature_chunk_size
 
 # u for unquantised, load 16 bit PCM samples and convert to mu-law
 
-data = np.memmap(pcm_file, dtype='int16', mode='r') # (1600000000,)
-nb_frames = (len(data)//(2*pcm_chunk_size)-1)//batch_size*batch_size # 333312
+data = np.memmap(pcm_file, dtype='int16', mode='r')
+nb_frames = (len(data)//(2*pcm_chunk_size)-1)//batch_size*batch_size
 
-features = np.memmap(feature_file, dtype='float32', mode='r') #(180000000,)
-
-# import IPython
-# IPython.embed()
+features = np.memmap(feature_file, dtype='float32', mode='r')
 
 # limit to discrete number of frames
-data = data[(4-args.lookahead)*2*frame_size:] #(1599999360,)
-data = data[:nb_frames*2*pcm_chunk_size] #(1599897600,)
+data = data[(4-args.lookahead)*2*frame_size:]
+data = data[:nb_frames*2*pcm_chunk_size]
 
 
-data = np.reshape(data, (nb_frames, pcm_chunk_size, 2)) #(333312, 2400, 2)
+data = np.reshape(data, (nb_frames, pcm_chunk_size, 2))
 
 #print("ulaw std = ", np.std(out_exc))
 
-sizeof = features.strides[-1] #4
+sizeof = features.strides[-1]
 features = np.lib.stride_tricks.as_strided(features, shape=(nb_frames, feature_chunk_size+4, nb_features),
                                            strides=(feature_chunk_size*nb_features*sizeof, nb_features*sizeof, sizeof))
-#  (333312, 19, 36)
 #features = features[:, :, :nb_used_features]
 
 
@@ -204,7 +188,7 @@ periods = (.1 + 50*features[:,:,nb_used_features-2:nb_used_features-1]+100).asty
 checkpoint = ModelCheckpoint('{}_{}_{}.h5'.format(args.output, args.grua_size, '{epoch:02d}'))
 
 if args.retrain is not None:
-    model.load_weights(args.retrain) #load the weight of last checkpoint?
+    model.load_weights(args.retrain)
 
 if quantize or retrain:
     #Adapting from an existing model
@@ -222,52 +206,12 @@ else:
 
 model.save_weights('{}_{}_initial.h5'.format(args.output, args.grua_size))
 
-# update arguments on dataloader
-# generate 64 bits inside the loader -> model.fit (same bits_in got embedded inside data?)
-# target: same bits embedded per second
 loader = LPCNetLoader(data, features, periods, batch_size, bits_in=None, e2e=flag_e2e, lookahead=args.lookahead)
 
-# update callbacks?
 callbacks = [checkpoint, sparsify, grub_sparsify]
 if args.logdir is not None:
     logdir = '{}/{}_{}_logs'.format(args.logdir, args.output, args.grua_size)
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     callbacks.append(tensorboard_callback)
 
-batch = loader[0]
-print(f"len(inputs) = {len(batch[0])}")
-print(f"len(outputs) = {len(batch[1])}")
-
-for i, inp in enumerate(batch[0]):
-    print(f"input[{i}] shape = {inp.shape}")
-
-for i, out in enumerate(batch[1]):
-    print(f"output[{i}] shape = {out.shape}")
-
-'''
-len(inputs) = 5
-len(outputs) = 1
-input[0] shape = (128, 2400, 1) #in_data
-input[1] shape = (128, 19, 20) #features
-input[2] shape = (128, 19, 1) #periods
-input[3] shape = (128, 2400, 64) #bits_in
-input[4] shape = (128, 15, 16) #lpcoeffs
-output[0] shape = (128, 2400, 1)
-'''
-
 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
-# model.fit_generator(loader, epochs=nb_epochs, callbacks=callbacks)
-# model.fit(loader, epochs=1, validation_split=0.0, callbacks=[ShapeLogger()])
-# model.fit(loader.take(1), callbacks=[ShapeLogger()], epochs=1)
-
-'''
-Epoch 1/120
-Traceback (most recent call last):
-  File "training_tf2/train_lpcnet.py", line 223, in <module>
-    model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
-  File "/home/adila/miniconda3/envs/lpcnet/lib/python3.8/site-packages/keras/utils/traceback_utils.py", line 70, in error_handler
-    raise e.with_traceback(filtered_tb) from None
-  File "/home/adila/miniconda3/envs/lpcnet/lib/python3.8/site-packages/keras/engine/training.py", line 1576, in fit
-    raise ValueError(
-ValueError: Unexpected result of `train_function` (Empty logs). Please use `Model.compile(..., run_eagerly=True)`, or `tf.config.run_functions_eagerly(True)` for more information of where went wrong, or file a issue/bug to `tf.keras`.
-'''
