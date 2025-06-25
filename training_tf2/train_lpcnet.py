@@ -157,7 +157,12 @@ with strategy.scope():
                                           lookahead=args.lookahead
                                           )
     if not flag_e2e:
-        model.compile(optimizer=opt, loss=metric_cel, metrics=metric_cel, run_eagerly=True) #defining loss functions
+        # model.compile(optimizer=opt, loss=[metric_cel, None, None], metrics=[metric_cel, None, None], run_eagerly=True) #defining loss functions
+        model.compile(optimizer=opt,
+              loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
+              metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
+            #   loss_weights = {'pdf': 1.0, 'residual': 0.0, 'pcm': 0.0},
+              run_eagerly=True)
         # model.compile(optimizer=opt, loss = [metric_cel, ], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
     else:
         model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
@@ -234,16 +239,20 @@ if args.logdir is not None:
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     callbacks.append(tensorboard_callback)
 
-batch = loader[0]
-print(f"len(inputs) = {len(batch[0])}")
-print(f"len(outputs) = {len(batch[1])}")
+# batch = loader[0]
+# print(f"len(inputs) = {len(batch[0])}")
+# print(f"len(outputs) = {len(batch[1])}")
 
-for i, inp in enumerate(batch[0]):
-    print(f"input[{i}] shape = {inp.shape}")
+# for i, inp in enumerate(batch[0]):
+#     print(f"input[{i}] shape = {inp.shape}")
 
-for i, out in enumerate(batch[1]):
-    print(f"output[{i}] shape = {out.shape}")
+# for i, out in enumerate(batch[1]):
+#     print(f"output[{i}] shape = {out.shape}")
 
+# print("nb_batches:", loader.nb_batches) #2604
+# print("len(loader):", len(loader)) #2604
+# import IPython
+# IPython.embed()
 '''
 len(inputs) = 5
 len(outputs) = 1
@@ -254,6 +263,14 @@ input[3] shape = (128, 2400, 64) #bits_in
 input[4] shape = (128, 15, 16) #lpcoeffs
 output[0] shape = (128, 2400, 1)
 '''
+
+# for layer in model.layers:
+#     if isinstance(layer, tf.keras.layers.Lambda):
+#         print(f"❌ Lambda layer found: {layer.name}")
+
+#         ❌ Lambda layer found: lambda
+#         ❌ Lambda layer found: lambda_1
+#         ❌ Lambda layer found: lambda_2
 
 model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
 # model.fit_generator(loader, epochs=nb_epochs, callbacks=callbacks)

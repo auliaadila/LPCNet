@@ -2,7 +2,7 @@
 Custom Loss functions and metrics for training/analysis
 """
 
-from tf_funcs import *
+from tf2_funcs import *
 import tensorflow as tf
 
 # The following loss functions all expect the lpcnet model to output the lpc prediction
@@ -75,10 +75,41 @@ def metric_cel(y_true, y_pred):
     y_true = tf.cast(y_true, 'float32')
     p = y_pred[:,:,0:1]
     model_out = y_pred[:,:,2:]
+
+    # tf.print(" =====> METRIC CEL")
+    # tf.print("y_true:", y_true.shape)
+    # tf.print("y_pred:", y_pred.shape)
+    # tf.print("p:",p.shape)
+    # tf.print("model_out:", model_out.shape)
+
+    #  =====> METRIC CEL
+    # y_true: (128, 2400, 1)
+    # y_pred: (128, 2400, 258)
+    # p: (128, 2400, 1)
+    # model_out: (128, 2400, 0)
+    # e_ground truth: (128, 2400, 1)
+
+    #  =====> TRUE METRIC CEL
+    # y_true: (None, None, None)
+    # y_pred: (128, 2400, 258)
+    # p: (128, 2400, 1)
+    # model_out: (128, 2400, 256)
+    # e_ground truth: (128, 2400, None)
+
+    #  =====> FIXED METRIC CEL
+    # y_true: TensorShape([128, 2400, 1])
+    # y_pred: TensorShape([128, 2400, 258])
+    # p: TensorShape([128, 2400, 1])
+    # model_out: TensorShape([128, 2400, 256])
+    # e_ground truth: (128, 2400, 1)
+
+    # import IPython
+    # IPython.embed()
     e_gt = tf_l2u(y_true - p)
     e_gt = tf.round(e_gt)
     e_gt = tf.cast(e_gt,'int32')
-    e_gt = tf.clip_by_value(e_gt,0,255) 
+    e_gt = tf.clip_by_value(e_gt,0,255)
+    # print("e_ground truth:", e_gt.shape)
     sparse_cel = tf.keras.losses.SparseCategoricalCrossentropy(reduction=tf.keras.losses.Reduction.NONE)(e_gt,model_out)
     return sparse_cel
 

@@ -39,7 +39,7 @@ from watermark import WatermarkEmbedding, WatermarkAddition
 import numpy as np
 import h5py
 import sys
-from tf2_funcs import *
+from tf_funcs import *
 from diffembed import diff_Embed
 from parameters import set_parameter
 
@@ -47,10 +47,6 @@ frame_size = 160
 pcm_bits = 8
 embed_size = 128
 pcm_levels = 2**pcm_bits
-
-def debug_shape(x, name):
-    tf.print(name, tf.shape(x))
-    return x
 
 def interleave(p, samples):
     p2=tf.expand_dims(p, 3)
@@ -62,12 +58,10 @@ def tree_to_pdf(p, samples):
     return interleave(p[:,:,1:2], samples) * interleave(p[:,:,2:4], samples) * interleave(p[:,:,4:8], samples) * interleave(p[:,:,8:16], samples) \
          * interleave(p[:,:,16:32], samples) * interleave(p[:,:,32:64], samples) * interleave(p[:,:,64:128], samples) * interleave(p[:,:,128:256], samples)
 
-@tf.function
 def tree_to_pdf_train(p):
     #FIXME: try not to hardcode the 2400 samples (15 frames * 160 samples/frame)
     return tree_to_pdf(p, 2400)
 
-@tf.function
 def tree_to_pdf_infer(p):
     return tree_to_pdf(p, 1)
 
@@ -76,33 +70,6 @@ def quant_regularizer(x):
     Q_1 = 1./Q
     #return .01 * tf.reduce_mean(1 - tf.math.cos(2*3.1415926535897931*(Q*x-tf.round(Q*x))))
     return .01 * tf.reduce_mean(K.sqrt(K.sqrt(1.0001 - tf.math.cos(2*3.1415926535897931*(Q*x-tf.round(Q*x))))))
-
-class ErrorCalc(tf.keras.layers.Layer):
-    def call(self, inputs):
-        pcm, preds = inputs
-        err = tf_l2u(pcm - tf.roll(preds, shift=1, axis=1))
-        return err
-
-# === Custom Layers to avoid Lambda problems ===
-class RepeatLayer(tf.keras.layers.Layer):
-    def __init__(self, repeats, axis=1, **kwargs):
-        super().__init__(**kwargs)
-        self.repeats = repeats
-        self.axis = axis
-
-    def call(self, inputs):
-        return tf.repeat(inputs, repeats=self.repeats, axis=self.axis)
-
-class TreeToPdf(tf.keras.layers.Layer):
-    def __init__(self, samples, **kwargs):
-        super().__init__(**kwargs)
-        self.samples = samples
-
-    def call(self, p):
-        return interleave(p[:,:,1:2], self.samples) * interleave(p[:,:,2:4], self.samples) * \
-               interleave(p[:,:,4:8], self.samples) * interleave(p[:,:,8:16], self.samples) * \
-               interleave(p[:,:,16:32], self.samples) * interleave(p[:,:,32:64], self.samples) * \
-               interleave(p[:,:,64:128], self.samples) * interleave(p[:,:,128:256], self.samples)
 
 class Sparsify(Callback):
     def __init__(self, t_start, t_end, interval, density, quantize=False):
@@ -294,14 +261,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
 
     cfeat = fdense2(fdense1(cfeat)) #(128, None, 128)
 
-    @tf.function
-    def error_calc_fn(x):
-        return tf_l2u(x[0] - tf.roll(x[1],1,axis = 1))
-
-    # error_calc = Lambda(error_calc_fn)
-    error_calc = ErrorCalc(name="error_calc")
-
-    # error_calc = Lambda(lambda x: tf_l2u(x[0] - tf.roll(x[1],1,axis = 1)))
+    error_calc = Lambda(lambda x: tf_l2u(x[0] - tf.roll(x[1],1,axis = 1)))
     if flag_e2e:
         lpcoeffs = diff_rc2lpc(name = "rc2lpc")(cfeat)
     else:
@@ -309,70 +269,109 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
         
     real_preds = diff_pred(name = "real_lpc2preds")([pcm,lpcoeffs]) #(128, None, 1)
     weighting = lpc_gamma ** np.arange(1, 17).astype('float32')
-    @tf.function
-    def lpcoeffs_to_weight(x):
-        return x[0]*x[1]
-
-    # weighted_lpcoeffs = Lambda(lambda x: x[0]*x[1])([lpcoeffs, weighting])
-    weighted_lpcoeffs = lpcoeffs_to_weight([lpcoeffs, weighting])
+    weighted_lpcoeffs = Lambda(lambda x: x[0]*x[1])([lpcoeffs, weighting])
     tensor_preds = diff_pred(name = "lpc2preds")([pcm,weighted_lpcoeffs]) #(128, None, 1)
-    residual = error_calc([pcm,tensor_preds])
-    # residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
+    
+    past_errors = error_calc([pcm,tensor_preds]) #embed here #(128, None, 1) None: number of samples, set at runtime
 
+    residual = pcm - tf.roll(tensor_preds,1,axis = 1) #embed
+
+    print("Residual:", residual.shape) #(128, None, 1)
+
+    
+    # # move this to dataloader
+    # generate bits
+    # bits_in = Input(shape=(None, 64),  # 64 bits per frame
+    #             batch_size=batch_size,
+    #             dtype='int32',
+    #             name='wm_bits')
+
+    # After you've computed `past_errors` (residual) but before LPC synthesis
     wm_embed   = WatermarkEmbedding(frame_size=160,
                                     bits_per_frame=64,
                                     # bits_in=None,
                                     alpha_init=0.04,
                                     trainable_alpha=True,
                                     name='wm_embed') # name ga ngaruh
+
     residual_w = wm_embed([bits_in, residual]) #shape?
+    print("residual_w", residual_w.shape) #residual_w (128, None, 1)
+    # print("Bits in:", bits_in.shape) #Bits in: (128, None, 1)
+    # print(bits_in)
     
-    # print("======= WM SPREAD =======")
-    # print("residual:", residual.shape) #(128, None, 1)
-    # print("residual_w", residual_w.shape) #(128, None, 1)
-    # print("bits in:", bits_in.shape) #(128, None, 1)
+    # print("Residual_w:",residual_w.shape) #Residual_w: (128, None, 1)
+
     
-    wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
+    wm_add = WatermarkAddition(learnable_mask=False, beta=0.1,
                                 name="wm_add")
-    pcm_w = wm_add([pcm, residual_w])
+    
+    
+    # pcm_w = wm_add([pcm, residual_w]) #shape?
 
-    # import IPython
-    # IPython.embed()
+    
+    # Feed the *marked* residual downstream instead of `past_errors`
+    # e.g. for past_errors you used:
+    # past_errors = error_calc([pcm, tensor_preds])
+    # just replace with:
+    # past_errors = residual_w
 
-    # print("======= WM ADD =======")
-    # print("pcm:", pcm.shape) #(128, None, 1)
-    # print("residual_w", residual_w.shape) #(128, None, 1)
-    # print("pcm_w:", pcm_w.shape) #(128, None, 1)
-
-    '''
-    ======= WM SPREAD =======
-    residual: (128, None, 1)
-    residual_w (128, None, 1)
-    bits in: (128, None, 1)
-    ======= WM ADD =======
-    pcm: (128, None, 1)
-    residual_w (128, None, 1)
-    pcm_w: (128, None, 1)
-    '''
     
     residual_u = tf_l2u(residual) #residual_u: (128, None, 1)
+    # print("residual_u:",residual_u.shape)
+    
+
+    # # Extra inputs ----------------------------------------------------------
+    # splitmess_in = Input(shape=(None,1), name='pn')      # ±1
+    # sigma_in     = Input(shape=(None,1), name='mask')    # masking σ
+
+    # # Frame-level α (either learnable or formula)
+    # alpha_dense  = Dense(1, activation='softplus', name='alpha_dense')
+    # alpha        = alpha_dense(tf.stop_gradient(cfeat))  # (B,T,1)
+
+    # # Watermark -------------------------------------------------------------
+    # delta_e      = Multiply(name='delta_e')(
+    #                 [alpha, past_errors, splitmess_in])  # α·e·m
+    # e_w          = Add(name='residual_w')([past_errors, delta_e])
+
+
+    # # Embed watermark
+    # alpha = 0.05
+    # bits_in = Input(shape=(None,), batch_size=batch_size, dtype='int32')
+    # exc = past_errors
+    # bits_pm = tf.cast(bits_in*2-1, tf.float32)
+    # bits_rep = tf.repeat(bits_pm, frame_size, axis=-1)
+    # bits_rep = tf.reshape(bits_rep,tf.shape(exc)[:-1])
+    # wm_dss = alpha * tf.expand_dims(bits_rep,-1)*exc
+    # mark = host_in + wm_dss ####
+
+    # host + residual_w
+    pcm_w = wm_add([pcm, residual_w]) #shape?
+    print("pcm_w:", pcm_w.shape)
     
     ## export pcm_w
+
+    '''
+    residual_w_u = tf_l2u(residual_w)
+    '''
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
+    # cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),past_errors])
     cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_u]) 
+
+    '''
+    # pred + residual_w -> if feed into rnn layer
+    cpcm_w = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),residual_w_u])
+    cpcm_w = GaussianNoise(.3)(cpcm_w)
+    cpcm_w = Reshape((-1, embed_size*3))(embed(cpcm_w))
+    cpcm_w_decoder = Reshape((-1, embed_size*3))(embed(cpcm_w))
+    '''
+
     cpcm = GaussianNoise(.3)(cpcm)
     cpcm = Reshape((-1, embed_size*3))(embed(cpcm))
     cpcm_decoder = Reshape((-1, embed_size*3))(embed(dpcm))
 
-    @tf.function
-    def repeat_fn(x):
-        return tf.repeat(x, repeats=frame_size, axis=1)
-
-    # rep = Lambda(repeat_fn)
-    rep = RepeatLayer(repeats=frame_size, name="repeat_layer")
-
-    # rep = Lambda(lambda x: K.repeat_elements(x, frame_size, 1))
+    
+    rep = Lambda(lambda x: K.repeat_elements(x, frame_size, 1))
 
     quant = quant_regularizer if quantize else None
 
@@ -394,11 +393,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     gru_out1, _ = rnn(rnn_in) #(128, None, 384)
     gru_out1 = GaussianNoise(.005)(gru_out1)
     gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
-    
-    tree_to_pdf_layer = TreeToPdf(samples=2400, name="tree_to_pdf_train")
-    ulaw_prob = tree_to_pdf_layer(md(gru_out2))
-    
-    # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
+    ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
     # md(gru_out2) (128, None, 256)
 
     # import IPython
@@ -417,11 +412,15 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
 
     # gru_out2, _ = rnn2(Concatenate()([gru_out1, rep(cfeat)])) #(128, None, 16)
     # ulaw_prob = Lambda(tree_to_pdf_train)(md(gru_out2)) # (None, 2400, 256)
+
+    # print(tenso)
+    m_out_w = pcm_w #how to get this to the output?
+    print("m_out_w:",m_out_w.shape) #m_out_w: (128, None, 1)
+    print("m_out:",m_out.shape) #m_out: (128, 2400, 258)
     
     if not flag_e2e:
         # model = Model([pcm, feat, pitch, lpcoeffs], m_out)
-        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], 
-              outputs = {'pdf': m_out, 'residual_w': residual_w, 'pcm_w': pcm_w})
+        model = Model([pcm, feat, pitch, bits_in, lpcoeffs], [m_out, residual_w, pcm_w]) #output utk loss dan inference
         # model = Model([pcm, feat, pitch, lpcoeffs, splitmess_in, sigma_in], m_out)
     else:
         # model = Model([pcm, feat, pitch], [m_out, cfeat])

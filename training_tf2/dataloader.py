@@ -99,7 +99,26 @@ class LPCNetLoader(Sequence):
             outputs.append(lpc2rc(lpc))
         else:
             inputs.append(lpc)
+        
+        # print("Inputs shapes:")
+        # for i, inp in enumerate(inputs):
+        #     print(f"Input {i}: {inp.shape}")
+
+        # print("Outputs shapes:")
+        # for i, out in enumerate(outputs):
+        #     print(f"Output {i}: {out.shape}")
+
+        # Inputs shapes:
+        # Input 0: (128, 2400, 1)
+        # Input 1: (128, 19, 20)
+        # Input 2: (128, 19, 1)
+        # Input 3: (128, 2400, 64)
+        # Input 4: (128, 15, 16)
+        # Outputs shapes:
+        # Output 0: (2400, 1)
+
         return (inputs, outputs)
+        
 
     def __len__(self):
         return self.nb_batches
