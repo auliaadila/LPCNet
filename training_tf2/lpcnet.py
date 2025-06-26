@@ -42,6 +42,7 @@ from tf_funcs import *
 from diffembed import diff_Embed
 from parameters import set_parameter
 from watermark import WatermarkEmbedding, WatermarkAddition
+from extractor_ import WatermarkExtractor
 
 frame_size = 160
 pcm_bits = 8
@@ -287,6 +288,10 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
                                 name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
+    # Extraction: Extract watermark
+    wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=False)
+    bits_pred = wm_extract(pcm_w)
+
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
     cpcm = Concatenate()([tf_l2u(pcm),tf_l2u(tensor_preds),past_errors])
@@ -326,7 +331,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     m_out = Concatenate(name='pdf')([tensor_preds,real_preds,ulaw_prob])
     if not flag_e2e:
         model = Model([pcm, feat, pitch, bits_in, lpcoeffs], 
-              outputs = {'pdf': m_out, 'residual_w': residual_w, 'pcm_w': pcm_w})
+              outputs = {'pdf': m_out, 'residual_w': residual_w, 'pcm_w': pcm_w, 'bits_pred':bits_pred})
     else:
         model = Model([pcm, feat, pitch], [m_out, cfeat])
     model.rnn_units1 = rnn_units1
@@ -354,4 +359,4 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     set_parameter(model, 'flag_e2e', flag_e2e, dtype='bool')
     set_parameter(model, 'lookahead', lookahead, dtype='int32')
 
-    return model, encoder, decoder, wm_embed, wm_add
+    return model, encoder, decoder, wm_embed, wm_add, wm_extract

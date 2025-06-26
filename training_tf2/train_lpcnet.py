@@ -142,10 +142,11 @@ with strategy.scope():
                                           lpc_gamma=args.lpc_gamma,
                                           lookahead=args.lookahead
                                           )
+
     if not flag_e2e:
         model.compile(optimizer=opt,
-              loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
-              metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None},
+              loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "binary_crossentropy"},
+              metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "accuracy"},
               run_eagerly=True)
     else:
         model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
