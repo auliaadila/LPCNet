@@ -24,8 +24,7 @@ class LPCNetLoader(Sequence):
         self.e2e = e2e
         self.lookahead = lookahead
         self.bps = BITS_PER_FRAME
-        self.bits_in = np.random.randint(0, 2, size=(1, self.bps), dtype='int32')
-        self.bits_in = np.broadcast_to(self.bits_in,(self.batch_size, self.data.shape[1], self.bps))
+        self.bits_in = np.random.randint(0, 2, size=(self.batch_size, self.bps), dtype='int32')
         self.on_epoch_end()
 
     def on_epoch_end(self):
@@ -38,16 +37,19 @@ class LPCNetLoader(Sequence):
         out_data = data[: , :, 1:]
         features = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :-16]
         periods = self.periods[self.indices[index*self.batch_size:(index+1)*self.batch_size], :, :]
-        bits_in = self.bits_in
 
-        outputs = out_data
+        actual_batch_size = len(data)
+        bits_in = np.random.randint(0, 2, size=(actual_batch_size, self.bps), dtype='int32')
+
+
+        outputs = {'pdf': out_data, 'residual_w': out_data, 'pcm_w': out_data, 'bits_pred': bits_in}
         inputs = [in_data, features, periods, bits_in]
         if self.lookahead > 0:
             lpc = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], 4-self.lookahead:-self.lookahead, -16:]
         else:
             lpc = self.features[self.indices[index*self.batch_size:(index+1)*self.batch_size], 4:, -16:]
         if self.e2e:
-            outputs.append(lpc2rc(lpc))
+            outputs['pdf'] = [out_data, lpc2rc(lpc)]
         else:
             inputs.append(lpc)
         return (inputs, outputs)

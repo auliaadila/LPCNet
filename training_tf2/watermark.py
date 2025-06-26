@@ -32,11 +32,14 @@ class WatermarkEmbedding(Layer):
 
     def call(self, inputs):
         wm_bpf, residual = inputs            # unpack
-        residual = residual * tf.ones_like(wm_bpf)  # broadcast residual:  (B,2400,1) → (B,2400,64)
-        wm_bpf = tf.cast(wm_bpf * 2 - 1, tf.float32)      # (B,F,BPF)
-        wm = self.alpha * wm_bpf * residual                 # (B,T,BPF) # per-bit contribution
-        wm_single = tf.reduce_sum(wm, axis=-1, keepdims=True)  # (B,2400,1) # collapse → single channel
+        wm_bpf = tf.cast(wm_bpf * 2 - 1, tf.float32)      # (B,T,BPF) -> {-1,+1}
+        
+        # Element-wise multiplication with broadcasting (B,T,64) * (B,T,1) = (B,T,64)
+        wm_per_bit = wm_bpf * residual
 
+        # Sum across bits and apply alpha scaling
+        wm_single = self.alpha * tf.reduce_sum(wm_per_bit, axis=-1, keepdims=True)  # (B,T,1)
+        
         return wm_single
 
 

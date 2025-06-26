@@ -241,7 +241,7 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     dec_feat = Input(shape=(None, cond_size))
     dec_state1 = Input(shape=(rnn_units1,))
     dec_state2 = Input(shape=(rnn_units2,))
-    bits_in = Input(shape=(None, 1), batch_size=batch_size)
+    bits_in = Input(shape=(64,), batch_size=batch_size)
 
     padding = 'valid' if training else 'same'
     fconv1 = Conv1D(cond_size, 3, padding=padding, activation='tanh', name='feature_conv1')
@@ -277,19 +277,24 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     # Get residual tensor
     residual = pcm - tf.roll(tensor_preds,1,axis = 1)
 
+    # Expand watermark bits from (B, 64) to (B, time, 64) to match residual time dimension
+    time_steps = tf.shape(residual)[1] 
+    bits_expanded = tf.expand_dims(bits_in, axis=1)  # (B, 64) -> (B, 1, 64)
+    bits_tiled = tf.tile(bits_expanded, [1, time_steps, 1])  # (B, 1, 64) -> (B, time, 64)
+
     # Embedding: Spread watermark
     wm_embed   = WatermarkEmbedding(frame_size=160,
                                     bits_per_frame=64,
                                     alpha_init=0.04,
                                     trainable_alpha=True,
                                     name='wm_embed')
-    residual_w = wm_embed([bits_in, residual])
+    residual_w = wm_embed([bits_tiled, residual])
     # Embedding: Add watermarked residue
     wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
                                 name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
     # Extraction: Extract watermark
-    wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=False)
+    wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=True)
     bits_pred = wm_extract(pcm_w)
 
     

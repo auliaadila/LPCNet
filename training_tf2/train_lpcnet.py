@@ -58,6 +58,8 @@ parser.add_argument('--lookahead', metavar='<nb frames>', default=2, type=int, h
 parser.add_argument('--logdir', metavar='<log dir>', help='directory for tensorboard log files')
 parser.add_argument('--lpc-gamma', type=float, default=1, help='gamma for LPC weighting')
 parser.add_argument('--cuda-devices', metavar='<cuda devices>', type=str, default=None, help='string with comma separated cuda device ids')
+parser.add_argument('--auto-resume', action='store_true', help='automatically resume from latest checkpoint')
+parser.add_argument('--checkpoint-freq', type=int, default=1, help='save checkpoint every N epochs (default: 1)')
 
 args = parser.parse_args()
 
@@ -129,28 +131,30 @@ if retrain:
 
 flag_e2e = args.flag_e2e
 
-opt = Adam(lr, decay=decay, beta_1=0.5, beta_2=0.8)
-strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
+opt = tf.keras.optimizers.legacy.Adam(lr, decay=decay, beta_1=0.5, beta_2=0.8)
+# Disable distributed strategy for now to fix broadcasting issues
+# strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
 
-with strategy.scope():
-    model, _, _, wm_embed, wm_add = lpcnet.new_lpcnet_model(rnn_units1=args.grua_size,
-                                          rnn_units2=args.grub_size, 
-                                          batch_size=batch_size, training=True,
-                                          quantize=quantize,
-                                          flag_e2e=flag_e2e,
-                                          cond_size=args.cond_size,
-                                          lpc_gamma=args.lpc_gamma,
-                                          lookahead=args.lookahead
-                                          )
+# with strategy.scope():
+model, _, _, wm_embed, wm_add, wm_extract = lpcnet.new_lpcnet_model(
+    rnn_units1=args.grua_size,
+    rnn_units2=args.grub_size, 
+    batch_size=batch_size, training=True,
+    quantize=quantize,
+    flag_e2e=flag_e2e,
+    cond_size=args.cond_size,
+    lpc_gamma=args.lpc_gamma,
+    lookahead=args.lookahead,
+)
 
-    if not flag_e2e:
-        model.compile(optimizer=opt,
-              loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "binary_crossentropy"},
-              metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "accuracy"},
-              run_eagerly=True)
-    else:
-        model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
-    model.summary()
+if not flag_e2e:
+    model.compile(optimizer=opt,
+          loss = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "binary_crossentropy"},
+          metrics = {'pdf': metric_cel, 'residual_w': None, 'pcm_w': None, 'bits_pred': "accuracy"},
+          run_eagerly=True)
+else:
+    model.compile(optimizer=opt, loss = [interp_mulaw(gamma=gamma), loss_matchlar()], loss_weights = [1.0, 2.0], metrics={'pdf':[metric_cel,metric_icel,metric_exc_sd,metric_oginterploss]})
+model.summary()
 
 feature_file = args.features
 pcm_file = args.data     # 16 bit unsigned short PCM samples
@@ -185,11 +189,60 @@ features = np.lib.stride_tricks.as_strided(features, shape=(nb_frames, feature_c
 periods = (.1 + 50*features[:,:,nb_used_features-2:nb_used_features-1]+100).astype('int16')
 #periods = np.minimum(periods, 255)
 
-# dump models to disk as we go
-checkpoint = ModelCheckpoint('{}_{}_{}.h5'.format(args.output, args.grua_size, '{epoch:02d}'))
+# Enhanced checkpointing with optimizer state
+import glob
+import re
 
+# Create checkpoint directory
+checkpoint_dir = f"checkpoints_{args.output}_{args.grua_size}"
+import os
+os.makedirs(checkpoint_dir, exist_ok=True)
+
+# Save both model weights and optimizer state
+checkpoint_path = os.path.join(checkpoint_dir, 'checkpoint_epoch_{epoch:02d}.ckpt')
+checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    checkpoint_path,
+    save_weights_only=True,
+    save_freq='epoch',  # Save every epoch, not every batch
+    verbose=1
+)
+
+# Function to find latest checkpoint
+def find_latest_checkpoint(checkpoint_dir):
+    pattern = os.path.join(checkpoint_dir, 'checkpoint_epoch_*.ckpt.index')
+    checkpoints = glob.glob(pattern)
+    if not checkpoints:
+        return None, 0
+    
+    # Extract epoch numbers and find the latest
+    epochs = []
+    for ckpt in checkpoints:
+        match = re.search(r'checkpoint_epoch_(\d+)\.ckpt\.index', ckpt)
+        if match:
+            epochs.append(int(match.group(1)))
+    
+    if epochs:
+        latest_epoch = max(epochs)
+        latest_ckpt = os.path.join(checkpoint_dir, f'checkpoint_epoch_{latest_epoch:02d}.ckpt')
+        return latest_ckpt, latest_epoch
+    return None, 0
+
+# Auto-resume from latest checkpoint or use --retrain flag
+initial_epoch = 0
 if args.retrain is not None:
+    print(f"Loading weights from specified checkpoint: {args.retrain}")
     model.load_weights(args.retrain)
+elif args.auto_resume:
+    # Try to auto-resume from latest checkpoint
+    latest_ckpt, latest_epoch = find_latest_checkpoint(checkpoint_dir)
+    if latest_ckpt:
+        print(f"Auto-resuming from checkpoint: {latest_ckpt} (epoch {latest_epoch})")
+        model.load_weights(latest_ckpt)
+        initial_epoch = latest_epoch
+    else:
+        print("No checkpoint found - starting training from scratch")
+else:
+    print("Starting training from scratch")
 
 if quantize or retrain:
     #Adapting from an existing model
@@ -215,4 +268,4 @@ if args.logdir is not None:
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
     callbacks.append(tensorboard_callback)
 
-model.fit(loader, epochs=nb_epochs, validation_split=0.0, callbacks=callbacks)
+model.fit(loader, epochs=nb_epochs, initial_epoch=initial_epoch, validation_split=0.0, callbacks=callbacks)
