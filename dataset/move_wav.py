@@ -1,6 +1,7 @@
 import os
-import shutil
 import re
+import shutil
+
 from pydub import AudioSegment
 
 pattern = ".wav"
