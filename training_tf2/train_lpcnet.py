@@ -257,16 +257,16 @@ model, _, _, wm_embed, wm_add, wm_extract = lpcnet.new_lpcnet_model(
 if not flag_e2e:
     model.compile(
         optimizer=opt,
-        loss={
+        loss={ #utk gradient
             "pdf": metric_cel,
             "residual_w": None,
-            "pcm_w": None,
+            "pcm_w": perceptual_loss,
             "bits_pred": "binary_crossentropy",
         },
-        metrics={
+        metrics={ #utk logging
             "pdf": metric_cel,
             "residual_w": None,
-            "pcm_w": None,
+            "pcm_w": perceptual_loss,
             "bits_pred": "accuracy",
         },
         run_eagerly=True,
