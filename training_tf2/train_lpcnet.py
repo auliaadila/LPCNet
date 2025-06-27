@@ -259,15 +259,21 @@ if not flag_e2e:
         optimizer=opt,
         loss={  # utk gradient
             "pdf": metric_cel,
-            "residual_w": None,
-            "pcm_w": perceptual_loss,
-            "bits_pred": "binary_crossentropy",
+            "residual_w": residual_distribution_loss,
+            "pcm_w": [l1_loss, spectral_loss, snr_loss],
+            "bits_pred": bit_consistency_loss,
+        },
+        loss_weights={
+            "pdf": 1.0,
+            "residual_w": 0.1,
+            "pcm_w": [0.4, 0.4, 0.2],  # L1, spectral, SNR
+            "bits_pred": 1.0,
         },
         metrics={  # utk logging
             "pdf": metric_cel,
             "residual_w": None,
-            "pcm_w": perceptual_loss,
-            "bits_pred": "accuracy",
+            "pcm_w": [perceptual_loss, spectral_loss],
+            "bits_pred": ["accuracy", bit_consistency_loss],
         },
         run_eagerly=True,
     )
