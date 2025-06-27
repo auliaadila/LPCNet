@@ -43,6 +43,7 @@ from diffembed import diff_Embed
 from parameters import set_parameter
 from watermark import WatermarkEmbedding, WatermarkAddition
 from extractor_ import WatermarkExtractor
+from attacks_ import *
 
 frame_size = 160
 pcm_bits = 8
@@ -279,8 +280,13 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
 
     # Expand watermark bits from (B, 64) to (B, time, 64) to match residual time dimension
     time_steps = tf.shape(residual)[1] 
-    bits_expanded = tf.expand_dims(bits_in, axis=1)  # (B, 64) -> (B, 1, 64)
-    bits_tiled = tf.tile(bits_expanded, [1, time_steps, 1])  # (B, 1, 64) -> (B, time, 64)
+    bits_expanded = tf.expand_dims(bits_in, axis=1)  # (B, 64) -> (B, 1, 64) #(128, 1, 64)
+    bits_tiled = tf.tile(bits_expanded, [1, time_steps, 1])  # (B, 1, 64) -> (B, time, 64) #(128, None, 64)
+
+    # print("BITS EXPANSION")
+    # print("time_steps:", time_steps.shape)
+    # print("bits expanded:", bits_expanded.shape) #bits expanded: (128, 1, 64)
+    # print("bits tiled:", bits_tiled.shape) #bits tiled: (128, None, 64)
 
     # Embedding: Spread watermark
     wm_embed   = WatermarkEmbedding(frame_size=160,
@@ -293,9 +299,19 @@ def new_lpcnet_model(rnn_units1=384, rnn_units2=16, nb_used_features=20, batch_s
     wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1,
                                 name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
+
+    # Attacks
+    attacked_w = LowpassFilter()(pcm_w)         # ⇽ water-marked signal
+    attacked_w = AdditiveNoise()(attacked_w)
+    attacked_w = CuttingSamples()(attacked_w)
+    attacked_w = ButterworthFilter()(attacked_w)
+
     # Extraction: Extract watermark
-    wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=True)
-    bits_pred = wm_extract(pcm_w)
+    wm_extract = WatermarkExtractor(time_len=attacked_w.shape[1], bits_per_frame=64, use_global_pool=True)
+    bits_pred = wm_extract(attacked_w)
+
+    # bits_hat = extractor(attacked_w)                      # your CNN/GRU
+    # loss = BCE(bits, bits_hat) + perceptual_penalty(pcm_w, attacked_w)
 
     
     embed = diff_Embed(name='embed_sig',initializer = PCMInit())
