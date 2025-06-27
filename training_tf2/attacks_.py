@@ -64,11 +64,13 @@ class CuttingSamples(Layer):
         self.prob = prob
 
     def call(self, x):
-        B, T, _ = x.shape
+        # B, T, _ = x.shape #shape statik
+        B = tf.shape(x)[0]
+        T = tf.shape(x)[1]
         rnd = tf.random.uniform((), 0, 100)
         def _cut():
             # build a mask of ones then zero out random indices
-            idx = tf.random.uniform((B, self.num), 0, T, dtype=tf.int32)
+            idx = tf.random.uniform((B, self.num), minval=0, maxval=T, dtype=tf.int32)
             mask = tf.ones_like(x)
             flat = tf.reshape(mask, (-1,))
             coef = tf.range(0, B)[:, None] * T + idx          # global idx

@@ -407,8 +407,12 @@ def new_lpcnet_model(
     attacked_w = ButterworthFilter()(attacked_w)
 
     # Extraction: Extract watermark
-    wm_extract = WatermarkExtractor(time_len=attacked_w.shape[1], bits_per_frame=64, use_global_pool=True)
+    wm_extract = WatermarkExtractor(time_len=None, bits_per_frame=64, use_global_pool=True)
+    attacked_w = tf.ensure_shape(attacked_w,[None, None, 1])
     bits_pred = wm_extract(attacked_w)
+
+    # wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=True)
+    # bits_pred = wm_extract(pcm_w)
 
     # bits_hat = extractor(attacked_w)                      # your CNN/GRU
     # loss = BCE(bits, bits_hat) + perceptual_penalty(pcm_w, attacked_w)

@@ -7,6 +7,8 @@ from tf_funcs import *
 
 # The following loss functions all expect the lpcnet model to output the lpc prediction
 
+def perceptual_loss(y_true, y_pred):
+    return tf.reduce_mean(tf.square(y_true - y_pred))
 
 # Computing the excitation by subtracting the lpc prediction from the target, followed by minimizing the cross entropy
 def res_from_sigloss():
