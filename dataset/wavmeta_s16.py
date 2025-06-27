@@ -1,7 +1,8 @@
-import os
 import argparse
-import subprocess
 import csv
+import os
+import subprocess
+
 
 def convert_wav_to_s16(meta_file, out_dir, identifier, col=1, concat=False):
     out_dir = os.path.abspath(out_dir)

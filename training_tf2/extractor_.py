@@ -2,8 +2,16 @@
 
 import tensorflow as tf
 from tensorflow.keras import Model
-from tensorflow.keras.layers import (Input, Conv1D, BatchNormalization, LeakyReLU,
-                                     GlobalAveragePooling1D, Flatten, Dense)
+from tensorflow.keras.layers import (
+    BatchNormalization,
+    Conv1D,
+    Dense,
+    Flatten,
+    GlobalAveragePooling1D,
+    Input,
+    LeakyReLU,
+)
+
 
 class WatermarkExtractor(Model):
     def __init__(self, time_len=2400, bits_per_frame=64, use_global_pool=False):
@@ -19,36 +27,32 @@ class WatermarkExtractor(Model):
         self.use_global_pool = use_global_pool
 
         self.conv_layers = [
-            Conv1D(32, 5, strides=2, padding='same'),
+            Conv1D(32, 5, strides=2, padding="same"),
             BatchNormalization(),
             LeakyReLU(alpha=0.2),
-
-            Conv1D(32, 5, strides=2, padding='same'),
+            Conv1D(32, 5, strides=2, padding="same"),
             BatchNormalization(),
             LeakyReLU(alpha=0.2),
-
-            Conv1D(64, 5, strides=2, padding='same'),
+            Conv1D(64, 5, strides=2, padding="same"),
             BatchNormalization(),
             LeakyReLU(alpha=0.2),
-
-            Conv1D(64, 5, strides=2, padding='same'),
+            Conv1D(64, 5, strides=2, padding="same"),
             BatchNormalization(),
             LeakyReLU(alpha=0.2),
-
-            Conv1D(128, 5, strides=2, padding='same'),
+            Conv1D(128, 5, strides=2, padding="same"),
             BatchNormalization(),
             LeakyReLU(alpha=0.2),
-
-            Conv1D(128, 5, strides=2, padding='same'),
+            Conv1D(128, 5, strides=2, padding="same"),
             BatchNormalization(),
-            LeakyReLU(alpha=0.2)
+            LeakyReLU(alpha=0.2),
         ]
 
         self.pool_or_flatten = (
-            GlobalAveragePooling1D(name="global_pool")
-            if use_global_pool else Flatten()
+            GlobalAveragePooling1D(name="global_pool") if use_global_pool else Flatten()
         )
-        self.output_dense = Dense(bits_per_frame, activation='sigmoid', name='bits_pred')
+        self.output_dense = Dense(
+            bits_per_frame, activation="sigmoid", name="bits_pred"
+        )
 
     def call(self, inputs, training=False):
         x = inputs
