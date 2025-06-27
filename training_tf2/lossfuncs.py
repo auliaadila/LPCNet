@@ -7,8 +7,14 @@ from tf_funcs import *
 
 # The following loss functions all expect the lpcnet model to output the lpc prediction
 
+
 def perceptual_loss(y_true, y_pred):
+    y_true = tf.cast(y_true, "float32")
+    # Normalize by dividing by 32768 to bring PCM values to [-1, 1] range
+    y_true = y_true / 32768.0
+    y_pred = y_pred / 32768.0
     return tf.reduce_mean(tf.square(y_true - y_pred))
+
 
 # Computing the excitation by subtracting the lpc prediction from the target, followed by minimizing the cross entropy
 def res_from_sigloss():

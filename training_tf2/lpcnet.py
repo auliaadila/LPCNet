@@ -291,6 +291,172 @@ class PCMInit(Initializer):
         return {"gain": self.gain, "seed": self.seed}
 
 
+class AttackScheduler(Callback):
+    def __init__(
+        self,
+        model,
+        stage1_end=40,
+        stage2_end=80,
+        stage3_end=120,
+        max_strength_multiplier=3.0,
+    ):
+        super(AttackScheduler, self).__init__()
+        self.model_ref = model
+        self.stage1_end = stage1_end
+        self.stage2_end = stage2_end
+        self.stage3_end = stage3_end
+        self.max_strength_multiplier = max_strength_multiplier
+
+    def on_epoch_begin(self, epoch, logs=None):
+        # Stage 1 (epochs 0-39): No attacks, multiplier = 0
+        if epoch < self.stage1_end:
+            strength_multiplier = 0.0  # No attacks
+            stage = 1
+
+        # Stage 2 (epochs 40-79): Medium attacks, multiplier 0.5 to 2.0
+        elif epoch < self.stage2_end:
+            progress = (epoch - self.stage1_end) / (self.stage2_end - self.stage1_end)
+            strength_multiplier = 0.5 + progress * 1.5  # 0.5 -> 2.0
+            stage = 2
+
+        # Stage 3 (epochs 80-119): Strong attacks, multiplier 2.0 to 3.0
+        else:
+            progress = (epoch - self.stage2_end) / (self.stage3_end - self.stage2_end)
+            strength_multiplier = 2.0 + progress * 1.0  # 2.0 -> 3.0
+            stage = 3
+
+        # Update attack layers in the model
+        self._update_attack_layers(strength_multiplier)
+
+        print(
+            f"Epoch {epoch + 1} (Stage {stage}): Attack strength multiplier = {strength_multiplier:.3f}"
+        )
+
+    def _update_attack_layers(self, multiplier):
+        # Find and update attack layers
+        attack_logs = []
+
+        # Special case: if multiplier is 0, disable all attacks
+        if multiplier == 0.0:
+            for layer in self.model_ref.layers:
+                class_name = layer.__class__.__name__
+
+                if class_name == "AdditiveNoise":
+                    layer.strength = 0.0
+                    layer.prob = 0.0
+                    attack_logs.append(
+                        f"  AdditiveNoise: DISABLED (strength=0.000000, prob=0.0%)"
+                    )
+
+                elif class_name == "CuttingSamples":
+                    layer.num = 0
+                    layer.prob = 0.0
+                    attack_logs.append(
+                        f"  CuttingSamples: DISABLED (num_samples=0, prob=0.0%)"
+                    )
+
+                elif class_name == "LowpassFilter":
+                    # Set cutoff very high to effectively disable filtering
+                    high_cutoff = 8000  # Nyquist frequency for 16kHz sampling
+                    from attacks_ import design_lowpass
+
+                    kernel = design_lowpass(high_cutoff)
+                    layer.kernel = tf.constant(kernel[:, None, None])
+                    attack_logs.append(
+                        f"  LowpassFilter: DISABLED (cutoff={high_cutoff:.0f}Hz)"
+                    )
+
+                elif class_name == "ButterworthFilter":
+                    layer.prob = 0.0
+                    attack_logs.append(f"  ButterworthFilter: DISABLED (prob=0.0%)")
+        else:
+            # Normal case: scale attacks based on multiplier
+            for layer in self.model_ref.layers:
+                class_name = layer.__class__.__name__
+
+                if class_name == "AdditiveNoise":
+                    # Update noise strength
+                    original_strength = 0.005  # NOISE_STRENGTH from attacks_.py
+                    max_strength = original_strength * self.max_strength_multiplier
+                    layer.strength = original_strength * multiplier
+
+                    # Also update probability
+                    original_prob = 30  # PROB_COEFF from attacks_.py
+                    max_prob = min(100, original_prob * self.max_strength_multiplier)
+                    layer.prob = min(100, original_prob * multiplier)
+
+                    attack_logs.append(
+                        f"  AdditiveNoise: strength={layer.strength:.6f} (max={max_strength:.6f}), prob={layer.prob:.1f}% (max={max_prob:.1f}%)"
+                    )
+
+                elif class_name == "CuttingSamples":
+                    # Update number of samples to cut
+                    original_num = 200  # NUM_SAMPLES_CUT from attacks_.py
+                    max_num = int(original_num * self.max_strength_multiplier)
+                    layer.num = int(original_num * multiplier)
+
+                    # Also update probability
+                    original_prob = 30  # PROB_COEFF from attacks_.py
+                    max_prob = min(100, original_prob * self.max_strength_multiplier)
+                    layer.prob = min(100, original_prob * multiplier)
+
+                    attack_logs.append(
+                        f"  CuttingSamples: num_samples={layer.num} (max={max_num}), prob={layer.prob:.1f}% (max={max_prob:.1f}%)"
+                    )
+
+                elif class_name == "LowpassFilter":
+                    # Update cutoff frequency (lower cutoff = stronger attack)
+                    original_cutoff = 4000  # Default cutoff from attacks_.py
+                    min_cutoff = 2000  # Minimum cutoff frequency
+                    max_cutoff_reduction = max(
+                        min_cutoff, original_cutoff / self.max_strength_multiplier
+                    )
+
+                    # Inverse relationship: higher multiplier = lower cutoff
+                    new_cutoff = max(min_cutoff, original_cutoff / multiplier)
+
+                    # Recreate kernel with new cutoff
+                    from attacks_ import design_lowpass
+
+                    kernel = design_lowpass(new_cutoff)
+                    layer.kernel = tf.constant(kernel[:, None, None])
+
+                    attack_logs.append(
+                        f"  LowpassFilter: cutoff={new_cutoff:.0f}Hz (min={max_cutoff_reduction:.0f}Hz)"
+                    )
+
+                elif class_name == "ButterworthFilter":
+                    # Update cutoff frequency (similar to LowpassFilter)
+                    original_cutoff = 4000
+                    min_cutoff = 2000
+                    max_cutoff_reduction = max(
+                        min_cutoff, original_cutoff / self.max_strength_multiplier
+                    )
+                    new_cutoff = max(min_cutoff, original_cutoff / multiplier)
+
+                    # Recreate filter coefficients
+                    from scipy.signal import butter
+
+                    layer.b, layer.a = butter(
+                        layer.a.shape[0] - 1, new_cutoff / (0.5 * 16000), "low"
+                    )
+
+                    # Also update probability
+                    original_prob = 30  # PROB_COEFF from attacks_.py
+                    max_prob = min(100, original_prob * self.max_strength_multiplier)
+                    layer.prob = min(100, original_prob * multiplier)
+
+                    attack_logs.append(
+                        f"  ButterworthFilter: cutoff={new_cutoff:.0f}Hz (min={max_cutoff_reduction:.0f}Hz), prob={layer.prob:.1f}% (max={max_prob:.1f}%)"
+                    )
+
+        # Print all attack parameter updates
+        if attack_logs:
+            print("  Attack parameters updated:")
+            for log in attack_logs:
+                print(log)
+
+
 class WeightClip(Constraint):
     """Clips the weights incident to each hidden unit to be inside a range"""
 
@@ -378,9 +544,13 @@ def new_lpcnet_model(
     residual = pcm - tf.roll(tensor_preds, 1, axis=1)
 
     # Expand watermark bits from (B, 64) to (B, time, 64) to match residual time dimension
-    time_steps = tf.shape(residual)[1] 
-    bits_expanded = tf.expand_dims(bits_in, axis=1)  # (B, 64) -> (B, 1, 64) #(128, 1, 64)
-    bits_tiled = tf.tile(bits_expanded, [1, time_steps, 1])  # (B, 1, 64) -> (B, time, 64) #(128, None, 64)
+    time_steps = tf.shape(residual)[1]
+    bits_expanded = tf.expand_dims(
+        bits_in, axis=1
+    )  # (B, 64) -> (B, 1, 64) #(128, 1, 64)
+    bits_tiled = tf.tile(
+        bits_expanded, [1, time_steps, 1]
+    )  # (B, 1, 64) -> (B, time, 64) #(128, None, 64)
 
     # print("BITS EXPANSION")
     # print("time_steps:", time_steps.shape)
@@ -401,14 +571,16 @@ def new_lpcnet_model(
     pcm_w = wm_add([pcm, residual_w])
 
     # Attacks
-    attacked_w = LowpassFilter()(pcm_w)         # ⇽ water-marked signal
+    attacked_w = LowpassFilter()(pcm_w)  # ⇽ water-marked signal
     attacked_w = AdditiveNoise()(attacked_w)
     attacked_w = CuttingSamples()(attacked_w)
     attacked_w = ButterworthFilter()(attacked_w)
 
     # Extraction: Extract watermark
-    wm_extract = WatermarkExtractor(time_len=None, bits_per_frame=64, use_global_pool=True)
-    attacked_w = tf.ensure_shape(attacked_w,[None, None, 1])
+    wm_extract = WatermarkExtractor(
+        time_len=None, bits_per_frame=64, use_global_pool=True
+    )
+    attacked_w = tf.ensure_shape(attacked_w, [None, None, 1])
     bits_pred = wm_extract(attacked_w)
 
     # wm_extract = WatermarkExtractor(time_len=pcm_w.shape[1], bits_per_frame=64, use_global_pool=True)

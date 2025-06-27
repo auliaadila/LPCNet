@@ -257,13 +257,13 @@ model, _, _, wm_embed, wm_add, wm_extract = lpcnet.new_lpcnet_model(
 if not flag_e2e:
     model.compile(
         optimizer=opt,
-        loss={ #utk gradient
+        loss={  # utk gradient
             "pdf": metric_cel,
             "residual_w": None,
             "pcm_w": perceptual_loss,
             "bits_pred": "binary_crossentropy",
         },
-        metrics={ #utk logging
+        metrics={  # utk logging
             "pdf": metric_cel,
             "residual_w": None,
             "pcm_w": perceptual_loss,
@@ -406,7 +406,10 @@ loader = LPCNetLoader(
     lookahead=args.lookahead,
 )
 
-callbacks = [checkpoint, sparsify, grub_sparsify]
+attack_scheduler = lpcnet.AttackScheduler(
+    model, stage1_end=40, stage2_end=80, stage3_end=120, max_strength_multiplier=3.0
+)
+callbacks = [checkpoint, sparsify, grub_sparsify, attack_scheduler]
 if args.logdir is not None:
     logdir = "{}/{}_{}_logs".format(args.logdir, args.output, args.grua_size)
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir)
