@@ -426,20 +426,23 @@ class AttackScheduler(Callback):
                     )
 
                 elif class_name == "ButterworthFilter":
-                    # Update cutoff frequency (similar to LowpassFilter)
+                    # For weak attacks, use high cutoff (less filtering)
+                    # For strong attacks, use low cutoff (more filtering)
                     original_cutoff = 4000
-                    min_cutoff = 2000
-                    max_cutoff_reduction = max(
-                        min_cutoff, original_cutoff / self.max_strength_multiplier
-                    )
-                    new_cutoff = max(min_cutoff, original_cutoff / multiplier)
+                    min_cutoff = 1000  # Strongest attack
+                    max_cutoff = 7000  # Weakest attack (almost no filtering)
 
-                    # Recreate filter coefficients
+                    # Linear interpolation: weak attacks = high cutoff
+                    new_cutoff = max_cutoff - (multiplier - 0.5) * (max_cutoff - min_cutoff) / 2.5
+                    new_cutoff = max(min_cutoff, min(max_cutoff, new_cutoff))
+
+                    # Recreate filter coefficients with proper normalization
                     from scipy.signal import butter
+                    nyquist = 0.5 * 16000  # 8000 Hz
+                    normalized_cutoff = new_cutoff / nyquist
 
-                    layer.b, layer.a = butter(
-                        layer.a.shape[0] - 1, new_cutoff / (0.5 * 16000), "low"
-                    )
+                    order = 4  # Default order from attacks_.py
+                    layer.b, layer.a = butter(order, normalized_cutoff, "low")
 
                     # Also update probability
                     original_prob = 30  # PROB_COEFF from attacks_.py
@@ -561,7 +564,7 @@ def new_lpcnet_model(
     wm_embed = WatermarkEmbedding(
         frame_size=160,
         bits_per_frame=64,
-        alpha_init=0.04,
+        alpha_init=0.2,  # Increased from 0.04 for detectable watermark
         trainable_alpha=True,
         name="wm_embed",
     )
@@ -570,11 +573,12 @@ def new_lpcnet_model(
     wm_add = WatermarkAddition(trainable_beta=False, beta_init=0.1, name="wm_add")
     pcm_w = wm_add([pcm, residual_w])
 
-    # Attacks
+    # Attacks (removed ButterworthFilter due to broken gradients)
     attacked_w = LowpassFilter()(pcm_w)  # ⇽ water-marked signal
     attacked_w = AdditiveNoise()(attacked_w)
     attacked_w = CuttingSamples()(attacked_w)
-    attacked_w = ButterworthFilter()(attacked_w)
+    # ButterworthFilter disabled - breaks gradients with tf.numpy_function
+    # attacked_w = ButterworthFilter()(attacked_w)
 
     # Extraction: Extract watermark
     wm_extract = WatermarkExtractor(

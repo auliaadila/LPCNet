@@ -265,9 +265,9 @@ if not flag_e2e:
         },
         loss_weights={
             "pdf": 1.0,
-            "residual_w": 0.1,
-            "pcm_w": [0.4, 0.4, 0.2],  # L1, spectral, SNR
-            "bits_pred": 1.0,
+            "residual_w": 0.01,  # Lower weight for residual regularization
+            "pcm_w": [0.1, 0.1, 0.05],  # Much lower for imperceptibility
+            "bits_pred": 2.0,  # Higher weight for bit accuracy
         },
         metrics={  # utk logging
             "pdf": metric_cel,

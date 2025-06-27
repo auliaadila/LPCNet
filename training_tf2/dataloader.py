@@ -57,15 +57,18 @@ class LPCNetLoader(Sequence):
         ]
 
         actual_batch_size = len(data)
+        # Use consistent bit patterns for stable learning
+        # Create deterministic bits based on batch index for reproducibility
+        np.random.seed(index * 1000)  # Deterministic seed per batch
         bits_in = np.random.randint(
             0, 2, size=(actual_batch_size, self.bps), dtype="int32"
         )
 
         outputs = {
             "pdf": out_data,
-            "residual_w": out_data,
-            "pcm_w": out_data,
-            "bits_pred": bits_in,
+            "residual_w": None,  # No target needed - use regularization loss only
+            "pcm_w": in_data,  # Target: clean PCM (compare watermarked vs clean)
+            "bits_pred": bits_in,  # Target: original bits
         }
         inputs = [in_data, features, periods, bits_in]
         if self.lookahead > 0:

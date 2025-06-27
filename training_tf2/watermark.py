@@ -37,11 +37,13 @@ class WatermarkEmbedding(Layer):
         wm_bpf, residual = inputs  # unpack
         wm_bpf = tf.cast(wm_bpf * 2 - 1, tf.float32)  # (B,T,BPF) -> {-1,+1}
 
-        # Element-wise multiplication with broadcasting (B,T,64) * (B,T,1) = (B,T,64)
-        wm_per_bit = wm_bpf * residual
-
-        # Sum across bits and apply alpha scaling
-        wm_single = self.alpha * tf.reduce_sum(
+        # Simplified embedding: use weighted average instead of sum to reduce interference
+        # Each bit contributes proportionally, but scaled down to prevent overwhelming
+        wm_per_bit = wm_bpf * residual  # (B,T,64) * (B,T,1) = (B,T,64)
+        
+        # Use mean instead of sum to prevent bit interference
+        # This is still suboptimal but more stable than summing all bits
+        wm_single = self.alpha * tf.reduce_mean(
             wm_per_bit, axis=-1, keepdims=True
         )  # (B,T,1)
 
