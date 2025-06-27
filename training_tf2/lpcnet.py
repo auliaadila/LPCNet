@@ -31,6 +31,7 @@ import sys
 import h5py
 import numpy as np
 import tensorflow as tf
+from attacks_ import *
 from diffembed import diff_Embed
 from extractor_ import WatermarkExtractor
 from mdense import MDense
@@ -58,11 +59,7 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from tf_funcs import *
-from diffembed import diff_Embed
-from parameters import set_parameter
-from watermark import WatermarkEmbedding, WatermarkAddition
-from extractor_ import WatermarkExtractor
-from attacks_ import *
+from watermark import WatermarkAddition, WatermarkEmbedding
 
 frame_size = 160
 pcm_bits = 8
@@ -361,7 +358,7 @@ class AttackScheduler(Callback):
                     from attacks_ import design_lowpass
 
                     kernel = design_lowpass(high_cutoff)
-                    layer.kernel = tf.constant(kernel[:, None, None])
+                    layer.kernel.assign(kernel[:, None, None])
                     attack_logs.append(
                         f"  LowpassFilter: DISABLED (cutoff={high_cutoff:.0f}Hz)"
                     )
@@ -419,7 +416,7 @@ class AttackScheduler(Callback):
                     from attacks_ import design_lowpass
 
                     kernel = design_lowpass(new_cutoff)
-                    layer.kernel = tf.constant(kernel[:, None, None])
+                    layer.kernel.assign(kernel[:, None, None])
 
                     attack_logs.append(
                         f"  LowpassFilter: cutoff={new_cutoff:.0f}Hz (min={max_cutoff_reduction:.0f}Hz)"
@@ -433,11 +430,13 @@ class AttackScheduler(Callback):
                     max_cutoff = 7000  # Weakest attack (almost no filtering)
 
                     # Linear interpolation: weak attacks = high cutoff
-                    new_cutoff = max_cutoff - (multiplier - 0.5) * (max_cutoff - min_cutoff) / 2.5
+                    new_cutoff = (
+                        max_cutoff
+                        - (multiplier - 0.5) * (max_cutoff - min_cutoff) / 2.5
+                    )
                     new_cutoff = max(min_cutoff, min(max_cutoff, new_cutoff))
 
                     # Recreate filter coefficients with proper normalization
-                    from scipy.signal import butter
                     nyquist = 0.5 * 16000  # 8000 Hz
                     normalized_cutoff = new_cutoff / nyquist
 
@@ -450,7 +449,7 @@ class AttackScheduler(Callback):
                     layer.prob = min(100, original_prob * multiplier)
 
                     attack_logs.append(
-                        f"  ButterworthFilter: cutoff={new_cutoff:.0f}Hz (min={max_cutoff_reduction:.0f}Hz), prob={layer.prob:.1f}% (max={max_prob:.1f}%)"
+                        f"  ButterworthFilter: cutoff={new_cutoff:.0f}Hz prob={layer.prob:.1f}% (max={max_prob:.1f}%)"
                     )
 
         # Print all attack parameter updates

@@ -1,10 +1,11 @@
 # lpcnet_augment.py
+from random import randint
+
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Layer, Conv1D
-from tensorflow.keras.backend import stop_gradient
-from random import randint
 from scipy.signal import butter
+from tensorflow.keras.backend import stop_gradient
+from tensorflow.keras.layers import Conv1D, Layer
 
 # ------------------------- constants -------------------------------- #
 CHUNK_SAMPLES = 2400  # 15 LPC frames × 160
@@ -32,7 +33,7 @@ class LowpassFilter(Layer):
     def __init__(self, cutoff=4_000, **kw):
         super().__init__(**kw)
         kernel = design_lowpass(cutoff)
-        self.kernel = tf.constant(kernel[:, None, None])  # (K,1,1)
+        self.kernel = tf.Variable(kernel[:, None, None], trainable=False)  # (K,1,1)
 
     def call(self, x):
         # x: (B, 2400, 1)

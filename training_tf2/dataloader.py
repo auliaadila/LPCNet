@@ -32,14 +32,19 @@ class LPCNetLoader(Sequence):
         self.e2e = e2e
         self.lookahead = lookahead
         self.bps = BITS_PER_FRAME
-        self.bits_in = np.random.randint(
-            0, 2, size=(self.batch_size, self.bps), dtype="int32"
-        )
+        # placeholder – real bits are created in on_epoch_end()
+        self.bits_table = None
         self.on_epoch_end()
 
     def on_epoch_end(self):
         self.indices = np.arange(self.nb_batches * self.batch_size)
         np.random.shuffle(self.indices)
+
+        # new random bit table for the forthcoming epoch
+        rng = np.random.default_rng()
+        self.bits_table = rng.integers(
+            0, 2, size=(self.nb_batches * self.batch_size, self.bps), dtype="int32"
+        )
 
     def __getitem__(self, index):
         data = self.data[
@@ -57,16 +62,15 @@ class LPCNetLoader(Sequence):
         ]
 
         actual_batch_size = len(data)
-        # Use consistent bit patterns for stable learning
-        # Create deterministic bits based on batch index for reproducibility
-        np.random.seed(index * 1000)  # Deterministic seed per batch
-        bits_in = np.random.randint(
-            0, 2, size=(actual_batch_size, self.bps), dtype="int32"
-        )
 
+        bits_in = self.bits_table[
+            self.indices[index * self.batch_size : (index + 1) * self.batch_size]
+        ]
+
+        dummy = np.zeros_like(in_data, dtype="float32")
         outputs = {
             "pdf": out_data,
-            "residual_w": None,  # No target needed - use regularization loss only
+            "residual_w": dummy,  # No target needed - use regularization loss only
             "pcm_w": in_data,  # Target: clean PCM (compare watermarked vs clean)
             "bits_pred": bits_in,  # Target: original bits
         }
