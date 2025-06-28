@@ -51,26 +51,19 @@ def watermark_robustness_loss(y_true, y_pred):
     return tf.reduce_mean(tf.square(y_true - y_pred))
 
 
-def snr_loss(clean_signal, watermarked_signal):
-    """Signal-to-Noise Ratio loss to control watermark strength"""
+def snr_loss(clean_signal, watermarked_signal, eps=1e-8):
     clean_signal = tf.cast(clean_signal, "float32") / 32768.0
-    watermarked_signal = watermarked_signal / 32768.0
+    watermarked_signal = tf.cast(watermarked_signal, "float32") / 32768.0
 
-    # Handle different tensor shapes - extract only the first channel if multi-channel
-    if len(clean_signal.shape) == 3 and clean_signal.shape[-1] > 1:
-        clean_signal = clean_signal[:, :, 0:1]
-    if len(watermarked_signal.shape) == 3 and watermarked_signal.shape[-1] > 1:
-        watermarked_signal = watermarked_signal[:, :, 0:1]
-
-    # Compute noise power
     noise = watermarked_signal - clean_signal
-    noise_power = tf.reduce_mean(tf.square(noise))
+    p_sig = tf.reduce_mean(tf.square(clean_signal))
+    p_noise = tf.reduce_mean(tf.square(noise))
 
-    # Compute signal power
-    signal_power = tf.reduce_mean(tf.square(clean_signal))
+    # NEW: avoid log(0) and division by 0
+    p_sig = tf.maximum(p_sig, eps)
+    p_noise = tf.maximum(p_noise, eps)
 
-    # Return negative SNR (we want to maximize SNR, so minimize negative SNR)
-    snr = 10 * tf.math.log(signal_power / (noise_power + 1e-8)) / tf.math.log(10.0)
+    snr = 10.0 * tf.math.log(p_sig / p_noise) / tf.math.log(10.0)
     return -snr
 
 

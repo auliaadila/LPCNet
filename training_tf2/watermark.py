@@ -6,13 +6,14 @@ from tensorflow.keras import initializers
 from tensorflow.keras.layers import Activation, Concatenate, Conv1D, Layer
 
 
-class WatermarkEmbedding(Layer):
+class WatermarkEmbedding(tf.keras.layers.Layer):
     def __init__(
         self,
         frame_size=160,
         bits_per_frame=64,
         alpha_init=0.05,
         trainable_alpha=False,
+        learnable_carriers=True,          # NEW
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -20,6 +21,7 @@ class WatermarkEmbedding(Layer):
         self.bpf = bits_per_frame
         self.alpha_init = alpha_init
         self.trainable_alpha = trainable_alpha
+        self.learnable_carriers = learnable_carriers
 
     def build(self, input_shape):
         if self.trainable_alpha:
@@ -31,35 +33,46 @@ class WatermarkEmbedding(Layer):
             )
         else:
             self.alpha = tf.constant(self.alpha_init, dtype=tf.float32)
+
+        # one scalar carrier per bit  (shape = (1, 1, 64))
+        init = tf.random_uniform_initializer(-1.0, 1.0)
+        self.carriers = self.add_weight(
+            "carriers",
+            shape=(1, 1, self.bpf),
+            initializer=init,
+            trainable=self.learnable_carriers,
+        )
         super().build(input_shape)
 
     def call(self, inputs):
-        wm_bpf, residual = inputs  # unpack
-        wm_bpf = tf.cast(wm_bpf * 2 - 1, tf.float32)  # (B,T,BPF) -> {-1,+1}
+        bits, residual = inputs                      # bits:(B,T,64) residual:(B,T,1)
+        bits = tf.cast(bits * 2 - 1, tf.float32)     # 0/1 → ±1
 
-        # Simplified embedding: use weighted average instead of sum to reduce interference
-        # Each bit contributes proportionally, but scaled down to prevent overwhelming
-        wm_per_bit = wm_bpf * residual  # (B,T,64) * (B,T,1) = (B,T,64)
-        
-        # Use mean instead of sum to prevent bit interference
-        # This is still suboptimal but more stable than summing all bits
-        wm_single = self.alpha * tf.reduce_mean(
-            wm_per_bit, axis=-1, keepdims=True
-        )  # (B,T,1)
+        # Apply carrier gains (broadcast over time)
+        # (B,T,64) * (1,1,64) → (B,T,64)
+        spread = bits * self.carriers
 
-        return wm_single
+        # Modulate host residual and sum
+        wm = tf.reduce_sum(spread * residual, axis=-1, keepdims=True)
+
+        # Normalise energy (~keep var constant) and scale by alpha
+        wm = self.alpha / tf.math.sqrt(
+            tf.cast(self.bpf, tf.float32)
+        ) * wm
+        return wm
 
     def get_config(self):
-        base = super().get_config()
-        base.update(
+        cfg = super().get_config()
+        cfg.update(
             dict(
                 frame_size=self.frame_size,
-                bpf=self.bits_per_frame,
+                bits_per_frame=self.bpf,
                 alpha_init=self.alpha_init,
                 trainable_alpha=self.trainable_alpha,
+                learnable_carriers=self.learnable_carriers,
             )
         )
-        return base
+        return cfg
 
 
 class WatermarkAddition(Layer):
